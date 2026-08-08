@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "1044491853800",
+    "project_id": "registerlogin-0535a6bc",
+    "storage_bucket": "registerlogin-0535a6bc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1044491853800:android:152711e942bfb687db4e5d",
+        "android_client_info": {
+          "package_name": "com.smartcontractai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1044491853800-6n8pehukifdh64nopdo03k1av9uaseq9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.smartcontractai",
+            "certificate_hash": "1fdaeb305d96b1e589f30ee566e7abdf11c243f5"
+          }
+        },
+        {
+          "client_id": "1044491853800-mt5jpjc114idjupebn2redtv6ah6c1p6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZi2gMrbaIADsEa7Izmq4UX6ykGUEkFHs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1044491853800-mt5jpjc114idjupebn2redtv6ah6c1p6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
