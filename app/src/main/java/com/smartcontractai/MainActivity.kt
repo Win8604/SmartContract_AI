@@ -71,6 +71,7 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FacebookAuthProvider
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.launch
 
@@ -338,11 +339,33 @@ class MainActivity : ComponentActivity() {
                                 ).show()
                                 facebookSuccessCallback?.invoke()
                             } else {
-                                Toast.makeText(
-                                    this@MainActivity,
-                                    "Firebase Facebook thất bại: ${task.exception?.message}",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                val exception = task.exception
+                                if (exception is FirebaseAuthUserCollisionException) {
+                                    val currentUser = auth.currentUser
+                                    if (currentUser != null) {
+                                        currentUser.linkWithCredential(credential).addOnCompleteListener { linkTask ->
+                                            if (linkTask.isSuccessful) {
+                                                saveFacebookUserToDb()
+                                                Toast.makeText(this@MainActivity, "Đã liên kết tài khoản Facebook thành công!", Toast.LENGTH_SHORT).show()
+                                                facebookSuccessCallback?.invoke()
+                                            } else {
+                                                Toast.makeText(this@MainActivity, "Liên kết Facebook thất bại: ${linkTask.exception?.message}", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    } else {
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            "Email này đã được dùng cho tài khoản Google/Email. Vui lòng đăng nhập Google/Email hoặc bật 'Multiple accounts per email' trong Firebase Console.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                } else {
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "Firebase Facebook thất bại: ${exception?.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
                             }
                         }
 

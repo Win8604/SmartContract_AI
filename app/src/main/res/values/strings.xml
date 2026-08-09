@@ -2,7 +2,7 @@
     <string name="app_name">SmartContract AI</string>
     <string name="default_web_client_id" translatable="false">1044491853800-mt5jpjc114idjupebn2redtv6ah6c1p6.apps.googleusercontent.com</string>
 
-    <string name="facebook_app_id">1606231704224128</string>
-    <string name="facebook_client_token">b2e058a288b41c1962b14206fd820dee</string>
-    <string name="fb_login_protocol_scheme">fb1606231704224128</string>
+    <string name="facebook_app_id">2180084312555401</string>
+    <string name="facebook_client_token">YOUR_FACEBOOK_CLIENT_TOKEN</string>
+    <string name="fb_login_protocol_scheme">fb2180084312555401</string>
 </resources>

@@ -1,4 +1,6 @@
 [versions]
+facebookSdk = "18.0.2"
+appcompat = "1.7.0"
 agp = "9.3.1"
 coreKtx = "1.19.0"
 junit = "4.13.2"
@@ -16,6 +18,8 @@ googleid = "1.2.0"
 playServicesAuth = "21.3.0"
 
 [libraries]
+facebook-android-sdk = { group = "com.facebook.android", name = "facebook-android-sdk", version.ref = "facebookSdk" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
