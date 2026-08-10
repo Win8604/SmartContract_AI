@@ -48,6 +48,7 @@ class LoginActivity : AppCompatActivity() {
         // }
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         // Nhận kết quả từ Facebook SDK

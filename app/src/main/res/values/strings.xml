@@ -5,4 +5,6 @@
     <string name="facebook_app_id">2180084312555401</string>
     <string name="facebook_client_token">YOUR_FACEBOOK_CLIENT_TOKEN</string>
     <string name="fb_login_protocol_scheme">fb2180084312555401</string>
+    <string name="msg_token_fmt">FCM Token: %1$s</string>
+    <string name="default_notification_channel_id">fcm_default_channel</string>
 </resources>

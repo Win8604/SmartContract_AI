@@ -1,3 +1,5 @@
+@file:Suppress("Deprecation")
+
 package com.smartcontractai
 
 import android.content.Context
@@ -19,9 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -42,7 +42,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import com.smartcontractai.data.User
 import com.smartcontractai.data.UserDatabaseHelper
 import com.smartcontractai.data.UserFileManager
@@ -53,7 +54,6 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
-import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.lifecycleScope
 import com.facebook.AccessToken
 import com.facebook.CallbackManager
@@ -62,7 +62,6 @@ import com.facebook.FacebookException
 import com.facebook.GraphRequest
 import com.facebook.login.LoginManager
 import com.facebook.login.LoginResult
-import com.facebook.login.widget.LoginButton
 import android.widget.Toast
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -73,7 +72,21 @@ import com.google.firebase.auth.FacebookAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.GoogleAuthProvider
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.util.Log
+import com.google.firebase.Firebase
+import com.google.firebase.analytics.analytics
+import com.google.firebase.messaging.FirebaseMessaging
+import com.smartcontractai.utils.FCMUtils
+import com.smartcontractai.utils.RequestNotificationPermissionIfNeeded
 
 fun Context.findActivity(): ComponentActivity? {
     var context = this
@@ -91,6 +104,42 @@ class MainActivity : ComponentActivity() {
     private var facebookSuccessCallback: (() -> Unit)? = null
     private var googleSuccessCallback: (() -> Unit)? = null
 
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+            val channel = NotificationChannel(
+                "default_channel",
+                "Default Notifications",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "General application notifications"
+            }
+
+            val notificationManager =
+                getSystemService(NotificationManager::class.java)
+
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    1001
+                )
+            }
+        }
+    }
+
     private val googleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
         try {
@@ -102,39 +151,39 @@ class MainActivity : ComponentActivity() {
                     .addOnCompleteListener(this) { authTask ->
                         if (authTask.isSuccessful) {
                             saveGoogleUserToDb()
-                            android.widget.Toast.makeText(
+                            Toast.makeText(
                                 this,
                                 "Đăng nhập Google thành công",
-                                android.widget.Toast.LENGTH_SHORT
+                                Toast.LENGTH_SHORT
                             ).show()
                             googleSuccessCallback?.invoke()
                         } else {
-                            android.widget.Toast.makeText(
+                            Toast.makeText(
                                 this,
                                 "Firebase Google thất bại: ${authTask.exception?.localizedMessage}",
-                                android.widget.Toast.LENGTH_LONG
+                                Toast.LENGTH_LONG
                             ).show()
                         }
                     }
             } else {
-                android.widget.Toast.makeText(
+                Toast.makeText(
                     this,
                     "Không lấy được ID Token từ Google",
-                    android.widget.Toast.LENGTH_SHORT
+                    Toast.LENGTH_SHORT
                 ).show()
             }
         } catch (e: ApiException) {
             if (e.statusCode != 12501) { // 12501 = SIGN_IN_CANCELLED
-                android.widget.Toast.makeText(
+                Toast.makeText(
                     this,
                     "Google Sign In lỗi (${e.statusCode}): ${e.localizedMessage ?: e.message}",
-                    android.widget.Toast.LENGTH_LONG
+                    Toast.LENGTH_LONG
                 ).show()
             } else {
-                android.widget.Toast.makeText(
+                Toast.makeText(
                     this,
                     "Bạn đã hủy đăng nhập Google",
-                    android.widget.Toast.LENGTH_SHORT
+                    Toast.LENGTH_SHORT
                 ).show()
             }
         }
@@ -143,23 +192,56 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        createNotificationChannel()
+        requestNotificationPermission()
+
         auth = FirebaseAuth.getInstance()
         setupFacebookCallback()
+
+        FirebaseMessaging.getInstance().isAutoInitEnabled = true
+        Firebase.analytics.setAnalyticsCollectionEnabled(true)
+
+        FirebaseMessaging.getInstance().token
+            .addOnCompleteListener { task ->
+
+                if (!task.isSuccessful) {
+                    Log.e(
+                        "FCM",
+                        "Failed to get FCM token",
+                        task.exception
+                    )
+                    return@addOnCompleteListener
+                }
+
+                val token = task.result
+
+                Log.d(
+                    "FCM",
+                    "FCM Token: $token"
+                )
+            }
 
         val accessToken = AccessToken.getCurrentAccessToken()
         val isFacebookLoggedIn = accessToken != null && !accessToken.isExpired
         if (isFacebookLoggedIn) {
-            // Facebook AccessToken còn hạn sử dụng
+            Log.d("Facebook", "Facebook AccessToken is active")
         }
 
         enableEdgeToEdge()
         setContent {
             SmartContractAITheme {
+                // Xin quyền thông báo (Android 13+) & Lấy token FCM liên kết Firebase
+                RequestNotificationPermissionIfNeeded(context = this) {
+                    FCMUtils.fetchFcmToken { token ->
+                        Log.d("FCM_FIREBASE", "FCM Device Token: $token")
+                    }
+                }
                 AppNavigation()
             }
         }
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         callbackManager.onActivityResult(requestCode, resultCode, data)
@@ -168,7 +250,7 @@ class MainActivity : ComponentActivity() {
     private fun getWebClientId(): String {
         return try {
             getString(R.string.default_web_client_id)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             "1044491853800-mt5jpjc114idjupebn2redtv6ah6c1p6.apps.googleusercontent.com"
         }
     }
@@ -244,30 +326,30 @@ class MainActivity : ComponentActivity() {
                         .addOnCompleteListener(this@MainActivity) { task ->
                             if (task.isSuccessful) {
                                 saveGoogleUserToDb()
-                                android.widget.Toast.makeText(
+                                Toast.makeText(
                                     this@MainActivity,
                                     "Đăng nhập Google thành công",
-                                    android.widget.Toast.LENGTH_SHORT
+                                    Toast.LENGTH_SHORT
                                 ).show()
                                 onSuccess()
                             } else {
-                                android.widget.Toast.makeText(
+                                Toast.makeText(
                                     this@MainActivity,
                                     "Firebase Google thất bại: ${task.exception?.localizedMessage}",
-                                    android.widget.Toast.LENGTH_LONG
+                                    Toast.LENGTH_LONG
                                 ).show()
                             }
                         }
                 } else {
                     signInWithGoogleLegacy(onSuccess)
                 }
-            } catch (e: GetCredentialCancellationException) {
-                android.widget.Toast.makeText(
+            } catch (_: GetCredentialCancellationException) {
+                Toast.makeText(
                     this@MainActivity,
                     "Bạn đã hủy đăng nhập Google",
-                    android.widget.Toast.LENGTH_SHORT
+                    Toast.LENGTH_SHORT
                 ).show()
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // Tự động chuyển sang GoogleSignInIntent fallback nếu CredentialManager không khả dụng hoặc trả về NoCredentialException
                 signInWithGoogleLegacy(onSuccess)
             }
@@ -1267,13 +1349,13 @@ fun RegisterScreen(
             Button(
                 onClick = {
                     if (fullName.isBlank() || phoneNumber.isBlank() || email.isBlank() || password.isBlank()) {
-                        android.widget.Toast.makeText(context, "Vui lòng nhập đầy đủ thông tin!", android.widget.Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Vui lòng nhập đầy đủ thông tin!", Toast.LENGTH_SHORT).show()
                     } else if (!isAgreed) {
-                        android.widget.Toast.makeText(context, "Bạn cần đồng ý với Điều khoản dịch vụ!", android.widget.Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Bạn cần đồng ý với Điều khoản dịch vụ!", Toast.LENGTH_SHORT).show()
                     } else {
                         val dbHelper = UserDatabaseHelper(context)
                         if (UserFileManager.isEmailExists(context, email) || dbHelper.isEmailExists(email)) {
-                            android.widget.Toast.makeText(context, "Email này đã được đăng ký!", android.widget.Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Email này đã được đăng ký!", Toast.LENGTH_SHORT).show()
                         } else {
                             val newUser = User(
                                 fullName = fullName,
@@ -1292,10 +1374,10 @@ fun RegisterScreen(
                             UserFileManager.saveUser(context, userInfo)
                             val isSuccess = dbHelper.registerUser(newUser)
                             if (isSuccess) {
-                                android.widget.Toast.makeText(context, "Đăng Ký Thành Công", android.widget.Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Đăng Ký Thành Công", Toast.LENGTH_SHORT).show()
                                 onRegisterSuccess()
                             } else {
-                                android.widget.Toast.makeText(context, "Đăng ký thất bại, vui lòng thử lại!", android.widget.Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Đăng ký thất bại, vui lòng thử lại!", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
@@ -1670,18 +1752,18 @@ fun LoginScreen(
                     Button(
                         onClick = {
                             if (email.isBlank() || password.isBlank()) {
-                                android.widget.Toast.makeText(context, "Vui lòng nhập đầy đủ Email và Mật khẩu!", android.widget.Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Vui lòng nhập đầy đủ Email và Mật khẩu!", Toast.LENGTH_SHORT).show()
                             } else {
                                 val dbHelper = UserDatabaseHelper(context)
                                 val isFileMatched = UserFileManager.checkNormalLogin(context, email, password)
                                 val isDbMatched = dbHelper.checkUserLogin(email, password)
                                 if (isFileMatched || isDbMatched) {
                                     // Khớp thông tin với file lưu trữ đăng ký
-                                    android.widget.Toast.makeText(context, "Đăng Nhập Thành Công", android.widget.Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Đăng Nhập Thành Công", Toast.LENGTH_SHORT).show()
                                     onLoginSuccess()
                                 } else {
                                     // Không khớp thông tin với file/db đăng ký
-                                    android.widget.Toast.makeText(context, "Tài Khoản Không Tồn Tại", android.widget.Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Tài Khoản Không Tồn Tại", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
@@ -1903,12 +1985,12 @@ fun DashboardScreen(
             // 1. Top Header Bar (Menu Icon, App Title, Notification Bell & Avatar với Menu)
             DashboardHeader(
                 onAccountClick = {
-                    android.widget.Toast.makeText(context, "Xem thông tin Tài Khoản", android.widget.Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Xem thông tin Tài Khoản", Toast.LENGTH_SHORT).show()
                     onAccountClick()
                 },
                 onLogoutClick = {
                     FirebaseAuth.getInstance().signOut()
-                    android.widget.Toast.makeText(context, "Đã đăng xuất thành công", android.widget.Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Đã đăng xuất thành công", Toast.LENGTH_SHORT).show()
                     onLogoutClick()
                 }
             )
@@ -1942,6 +2024,8 @@ fun DashboardHeader(
     onLogoutClick: () -> Unit = {}
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val currentUser = FirebaseAuth.getInstance().currentUser
+    val avatarUrl = currentUser?.photoUrl?.toString()
 
     Row(
         modifier = Modifier
@@ -1987,22 +2071,33 @@ fun DashboardHeader(
 
             Spacer(modifier = Modifier.width(14.dp))
 
-            // User Avatar Icon (Nhấn vào sẽ mở Popup Menu)
+            // User Avatar Icon (Hiển thị ảnh Facebook/Google URL nếu có, ngược lại dùng Icon mặc định)
             Box {
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFE2E8F0))
                         .clickable { menuExpanded = true },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "User Avatar",
-                        tint = Color(0xFF0284C7),
-                        modifier = Modifier.size(22.dp)
-                    )
+                    if (!avatarUrl.isNullOrEmpty()) {
+                        AsyncImage(
+                            model = avatarUrl,
+                            contentDescription = "User Avatar",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "User Avatar",
+                            tint = Color(0xFF0284C7),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
 
                 // Menu sổ xuống

@@ -60,7 +60,7 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
             val result = db.insert(TABLE_USERS, null, values)
             db.close()
             result != -1L
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             db.close()
             false
         }
