@@ -1,3 +1,5 @@
+@file:Suppress("Deprecation", "UnusedImport", "UNUSED_IMPORT")
+
 package com.smartcontractai
 
 import android.content.Intent

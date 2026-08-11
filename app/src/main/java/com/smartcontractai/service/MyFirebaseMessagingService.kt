@@ -10,6 +10,8 @@ import com.google.firebase.messaging.RemoteMessage
 import com.smartcontractai.MainActivity
 import com.smartcontractai.R
 
+import com.smartcontractai.data.NotificationRepository
+
 class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
@@ -17,11 +19,14 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val title = message.notification?.title
             ?: message.data["title"]
-            ?: "Thông báo"
+            ?: "Thông báo mới"
 
         val body = message.notification?.body
             ?: message.data["body"]
-            ?: ""
+            ?: "Bạn vừa nhận được thông báo mới từ hệ thống."
+
+        // Đẩy thông báo từ Firebase vào Notification Feed thời gian thực và lưu vào Database
+        NotificationRepository.addNotification(applicationContext, title, body)
 
         showNotification(title, body)
     }

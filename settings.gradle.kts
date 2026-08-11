@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SmartContract AI"
+rootProject.name = "SmartContract_AI"
 include(":app")
