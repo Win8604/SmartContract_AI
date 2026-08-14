@@ -2,9 +2,9 @@
 
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
-    alias(libs.plugins.kotlin.android)
 }
 
 android {
@@ -47,10 +47,21 @@ android {
     }
     buildFeatures {
         compose = true
+        viewBinding = true
     }
     //noinspection Deprecation
     kotlinOptions {
         jvmTarget = "11"
+        freeCompilerArgs += listOf(
+            "-opt-in=kotlin.RequiresOptIn",
+            "-Xsuppress-version-warnings"
+        )
+    }
+}
+
+configurations.all {
+    resolutionStrategy {
+        force("androidx.compose.runtime:runtime:1.7.6")
     }
 }
 
@@ -59,6 +70,7 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.glide)
 
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
@@ -83,6 +95,7 @@ dependencies {
     implementation(libs.coil.compose)
 
     // Credentials & Auth
+    implementation(libs.androidx.biometric)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
