@@ -59,12 +59,6 @@ android {
     }
 }
 
-configurations.all {
-    resolutionStrategy {
-        force("androidx.compose.runtime:runtime:1.7.6")
-    }
-}
-
 dependencies {
     // AndroidX & Core
     implementation(libs.androidx.appcompat)

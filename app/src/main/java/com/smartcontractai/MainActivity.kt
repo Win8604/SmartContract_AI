@@ -227,10 +227,10 @@ class MainActivity : FragmentActivity() {
                 auth.signInWithCredential(firebaseCredential)
                     .addOnCompleteListener(this) { authTask ->
                         if (authTask.isSuccessful) {
-                            saveGoogleUserToDb()
+                            saveGoogleUserToDb(isCorporateSocialAuth)
                             Toast.makeText(
                                 this,
-                                "Đăng nhập Google thành công",
+                                if (isCorporateSocialAuth) "Đăng nhập Google Doanh nghiệp thành công" else "Đăng nhập Google thành công",
                                 Toast.LENGTH_SHORT
                             ).show()
                             googleSuccessCallback?.invoke()
@@ -332,7 +332,7 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun saveGoogleUserToDb() {
+    private fun saveGoogleUserToDb(isCorporate: Boolean = false) {
         val user = auth.currentUser
         if (user != null) {
             val dbHelper = UserDatabaseHelper(this)
@@ -340,33 +340,45 @@ class MainActivity : FragmentActivity() {
             if (userEmail.isNotEmpty()) {
                 val userName = user.displayName ?: "Google User"
                 val photoUrl = user.photoUrl?.toString()
+                val authTypeStr = if (isCorporate) "CORPORATE_GOOGLE" else "GOOGLE"
                 val userInfo = UserInfo(
                     fullName = userName,
                     phoneNumber = "",
                     email = userEmail,
                     password = "GOOGLE_AUTH_USER",
-                    authType = "GOOGLE",
-                    avatarUrl = photoUrl
+                    authType = authTypeStr,
+                    avatarUrl = photoUrl,
+                    isCorporate = isCorporate,
+                    accountType = if (isCorporate) "CORPORATE" else "PERSONAL"
                 )
-                UserFileManager.saveUser(this, userInfo)
+                if (isCorporate) {
+                    UserFileManager.saveCorporateUser(this, userInfo)
+                } else {
+                    UserFileManager.savePersonalUser(this, userInfo)
+                }
                 UserFileManager.saveCurrentSessionEmail(this, userEmail)
                 if (!dbHelper.isEmailExists(userEmail)) {
-                    dbHelper.registerUser(
-                        User(
-                            fullName = userName,
-                            phoneNumber = "",
-                            email = userEmail,
-                            password = "GOOGLE_AUTH_USER",
-                            authType = "GOOGLE"
-                        )
+                    val newUser = User(
+                        fullName = userName,
+                        phoneNumber = "",
+                        email = userEmail,
+                        password = "GOOGLE_AUTH_USER",
+                        authType = authTypeStr,
+                        isCorporate = isCorporate,
+                        accountType = if (isCorporate) "CORPORATE" else "PERSONAL"
                     )
+                    if (isCorporate) {
+                        dbHelper.registerCorporateUser(newUser)
+                    } else {
+                        dbHelper.registerPersonalUser(newUser)
+                    }
                 }
             }
         }
     }
 
     // ==================== GOOGLE LOGIN ====================
-    fun signInWithGoogle(onSuccess: () -> Unit) {
+    fun signInWithGoogle(onSuccess: () -> Unit, isCorporate: Boolean = false) {
         googleSuccessCallback = onSuccess
         val credentialManager = CredentialManager.create(this)
         val webClientId = getWebClientId()
@@ -405,10 +417,10 @@ class MainActivity : FragmentActivity() {
                     auth.signInWithCredential(firebaseCredential)
                         .addOnCompleteListener(this@MainActivity) { task ->
                             if (task.isSuccessful) {
-                                saveGoogleUserToDb()
+                                saveGoogleUserToDb(isCorporate)
                                 Toast.makeText(
                                     this@MainActivity,
-                                    "Đăng nhập Google thành công",
+                                    if (isCorporate) "Đăng nhập Google Doanh nghiệp thành công" else "Đăng nhập Google thành công",
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 onSuccess()
@@ -421,7 +433,7 @@ class MainActivity : FragmentActivity() {
                             }
                         }
                 } else {
-                    signInWithGoogleLegacy(onSuccess)
+                    signInWithGoogleLegacy(onSuccess, isCorporate)
                 }
             } catch (_: GetCredentialCancellationException) {
                 Toast.makeText(
@@ -431,13 +443,14 @@ class MainActivity : FragmentActivity() {
                 ).show()
             } catch (_: Exception) {
                 // Tự động chuyển sang GoogleSignInIntent fallback nếu CredentialManager không khả dụng hoặc trả về NoCredentialException
-                signInWithGoogleLegacy(onSuccess)
+                signInWithGoogleLegacy(onSuccess, isCorporate)
             }
         }
     }
 
-    fun signInWithGoogleLegacy(onSuccess: () -> Unit) {
+    fun signInWithGoogleLegacy(onSuccess: () -> Unit, isCorporate: Boolean = false) {
         googleSuccessCallback = onSuccess
+        isCorporateSocialAuth = isCorporate
         val webClientId = getWebClientId()
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(webClientId)
@@ -450,11 +463,12 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun saveFacebookUserToDb(name: String? = null, email: String? = null, avatarUrl: String? = null) {
+    private fun saveFacebookUserToDb(name: String? = null, email: String? = null, avatarUrl: String? = null, isCorporate: Boolean = false) {
         val user = auth.currentUser
         val dbHelper = UserDatabaseHelper(this)
         val userEmail = email ?: user?.email ?: if (user != null) "${user.uid}@facebook.com" else ""
         val userName = name ?: user?.displayName ?: "Facebook User"
+        val authTypeStr = if (isCorporate) "CORPORATE_FACEBOOK" else "FACEBOOK"
 
         if (userEmail.isNotEmpty()) {
             val existingUser = UserFileManager.getUserByEmail(this, userEmail)
@@ -465,24 +479,37 @@ class MainActivity : FragmentActivity() {
                 phoneNumber = existingUser?.phoneNumber ?: "",
                 email = userEmail,
                 password = "FACEBOOK_AUTH_USER",
-                authType = "FACEBOOK",
-                avatarUrl = fbPhotoUrl
+                authType = authTypeStr,
+                avatarUrl = fbPhotoUrl,
+                isCorporate = isCorporate,
+                accountType = if (isCorporate) "CORPORATE" else "PERSONAL"
             )
-            UserFileManager.saveUser(this, userInfo)
+            if (isCorporate) {
+                UserFileManager.saveCorporateUser(this, userInfo)
+            } else {
+                UserFileManager.savePersonalUser(this, userInfo)
+            }
             UserFileManager.saveCurrentSessionEmail(this, userEmail)
             if (!dbHelper.isEmailExists(userEmail)) {
-                dbHelper.registerUser(
-                    User(
-                        fullName = userName,
-                        phoneNumber = "",
-                        email = userEmail,
-                        password = "FACEBOOK_AUTH_USER",
-                        authType = "FACEBOOK"
-                    )
+                val newUser = User(
+                    fullName = userName,
+                    phoneNumber = "",
+                    email = userEmail,
+                    password = "FACEBOOK_AUTH_USER",
+                    authType = authTypeStr,
+                    isCorporate = isCorporate,
+                    accountType = if (isCorporate) "CORPORATE" else "PERSONAL"
                 )
+                if (isCorporate) {
+                    dbHelper.registerCorporateUser(newUser)
+                } else {
+                    dbHelper.registerPersonalUser(newUser)
+                }
             }
         }
     }
+
+    private var isCorporateSocialAuth = false
 
     // ==================== FACEBOOK LOGIN ====================
     private fun setupFacebookCallback() {
@@ -498,7 +525,7 @@ class MainActivity : FragmentActivity() {
                         .addOnCompleteListener(this@MainActivity) { task ->
                             if (task.isSuccessful) {
                                 val user = auth.currentUser
-                                saveFacebookUserToDb()
+                                saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
                                 Toast.makeText(
                                     this@MainActivity,
                                     "Đăng nhập Facebook thành công: ${user?.displayName ?: user?.email ?: "User"}",
@@ -512,7 +539,7 @@ class MainActivity : FragmentActivity() {
                                     if (currentUser != null) {
                                         currentUser.linkWithCredential(credential).addOnCompleteListener { linkTask ->
                                             if (linkTask.isSuccessful) {
-                                                saveFacebookUserToDb()
+                                                saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
                                                 Toast.makeText(this@MainActivity, "Đã liên kết tài khoản Facebook thành công!", Toast.LENGTH_SHORT).show()
                                                 facebookSuccessCallback?.invoke()
                                             } else {
@@ -547,9 +574,9 @@ class MainActivity : FragmentActivity() {
                             val rawUrl = dataObj?.optString("url")
                             val avatarUrl = if (!rawUrl.isNullOrEmpty()) rawUrl else if (fbId.isNotEmpty()) "https://graph.facebook.com/$fbId/picture?type=large" else null
 
-                            saveFacebookUserToDb(name, email, avatarUrl)
+                            saveFacebookUserToDb(name, email, avatarUrl, isCorporate = isCorporateSocialAuth)
                         } else {
-                            saveFacebookUserToDb()
+                            saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
                         }
                     }
                     val parameters = Bundle().apply {
@@ -579,8 +606,9 @@ class MainActivity : FragmentActivity() {
     }
 
     // Khi người dùng bấm vào nút Facebook trên giao diện:
-    fun signInWithFacebook(onSuccess: () -> Unit) {
+    fun signInWithFacebook(onSuccess: () -> Unit, isCorporate: Boolean = false) {
         facebookSuccessCallback = onSuccess
+        isCorporateSocialAuth = isCorporate
         LoginManager.getInstance().logOut()
         LoginManager.getInstance().logInWithReadPermissions(
             this,
@@ -674,6 +702,11 @@ fun AppNavigation() {
 
 @Composable
 fun BottomNavigationBar(selectedTab: Int, onTabSelected: (Int) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val currentEmail = UserFileManager.getCurrentSessionEmail(context)
+    val currentUser = remember(currentEmail) { UserFileManager.getUserByEmail(context, currentEmail) }
+    val isCorporateUser = currentUser?.isCorporate == true || currentUser?.accountType == "CORPORATE" || currentUser?.authType?.startsWith("CORPORATE") == true
+
     NavigationBar(
         containerColor = Color.White,
         tonalElevation = 8.dp
@@ -757,6 +790,7 @@ fun RegisterScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     var isCorporate by remember { mutableStateOf(false) }
     var fullName by remember { mutableStateOf("") }
+    var taxCode by remember { mutableStateOf("") }
     var phoneNumber by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -786,32 +820,7 @@ fun RegisterScreen(
         ) {
             Spacer(modifier = Modifier.height(30.dp))
 
-            // Top Bar với nút Quay lại (nếu có)
-            if (onBack != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Quay lại",
-                            tint = Color(0xFF334155),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Text(
-                        text = "Quay lại",
-                        fontSize = 12.sp,
-                        color = Color(0xFF475569),
-                        modifier = Modifier.clickable { onBack() }
-                    )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(10.dp))
 
             // White Card bọc giao diện Register
             Card(
@@ -855,8 +864,8 @@ fun RegisterScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Tạo tài khoản mới",
-                        fontSize = 22.sp,
+                        text = if (isCorporate) "Tạo tài khoản Doanh nghiệp" else "Tạo tài khoản Cá nhân",
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0038A8),
                         textAlign = TextAlign.Center
@@ -865,7 +874,7 @@ fun RegisterScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "Bảo mật thông minh cho hợp đồng của bạn",
+                        text = if (isCorporate) "Bảo mật thông minh cho hợp đồng doanh nghiệp" else "Bảo mật thông minh cho hợp đồng của bạn",
                         fontSize = 12.sp,
                         color = AppColors.SubtitleGray,
                         textAlign = TextAlign.Center
@@ -947,16 +956,22 @@ fun RegisterScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Trường 1: Họ và tên
+                    // Trường 1: Họ và tên (Cá nhân) / Tên doanh nghiệp (Doanh nghiệp)
                     OutlinedTextField(
                         value = fullName,
                         onValueChange = { fullName = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Họ và tên", color = Color(0xFF94A3B8), fontSize = 13.sp) },
+                        placeholder = { 
+                            Text(
+                                text = if (isCorporate) "Tên Doanh nghiệp / Công ty" else "Họ và tên", 
+                                color = Color(0xFF94A3B8), 
+                                fontSize = 13.sp
+                            ) 
+                        },
                         shape = RoundedCornerShape(12.dp),
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.Outlined.Badge,
+                                imageVector = if (isCorporate) Icons.Outlined.Business else Icons.Outlined.Badge,
                                 contentDescription = null,
                                 tint = Color(0xFF64748B),
                                 modifier = Modifier.size(20.dp)
@@ -966,6 +981,29 @@ fun RegisterScreen(
                         singleLine = true
                     )
 
+                    // Nếu là Doanh nghiệp -> Hiển thị thêm ô Mã số thuế
+                    if (isCorporate) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = taxCode,
+                            onValueChange = { taxCode = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Mã số thuế doanh nghiệp", color = Color(0xFF94A3B8), fontSize = 13.sp) },
+                            shape = RoundedCornerShape(12.dp),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Outlined.Numbers,
+                                    contentDescription = null,
+                                    tint = Color(0xFF64748B),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            colors = customTextFieldColors(),
+                            singleLine = true
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
 
                     // Trường 2: Số điện thoại
@@ -973,7 +1011,13 @@ fun RegisterScreen(
                         value = phoneNumber,
                         onValueChange = { phoneNumber = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Số điện thoại", color = Color(0xFF94A3B8), fontSize = 13.sp) },
+                        placeholder = { 
+                            Text(
+                                text = if (isCorporate) "Số điện thoại doanh nghiệp" else "Số điện thoại", 
+                                color = Color(0xFF94A3B8), 
+                                fontSize = 13.sp
+                            ) 
+                        },
                         shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         leadingIcon = {
@@ -995,7 +1039,13 @@ fun RegisterScreen(
                         value = email,
                         onValueChange = { email = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Email hoặc Gmail", color = Color(0xFF94A3B8), fontSize = 13.sp) },
+                        placeholder = { 
+                            Text(
+                                text = if (isCorporate) "Email liên hệ công ty" else "Email hoặc Gmail", 
+                                color = Color(0xFF94A3B8), 
+                                fontSize = 13.sp
+                            ) 
+                        },
                         shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         leadingIcon = {
@@ -1081,7 +1131,7 @@ fun RegisterScreen(
                     // Nút Đăng ký ➔
                     Button(
                         onClick = {
-                            if (fullName.isBlank() || phoneNumber.isBlank() || email.isBlank() || password.isBlank()) {
+                            if (fullName.isBlank() || phoneNumber.isBlank() || email.isBlank() || password.isBlank() || (isCorporate && taxCode.isBlank())) {
                                 Toast.makeText(context, "Vui lòng nhập đầy đủ thông tin!", Toast.LENGTH_SHORT).show()
                             } else if (confirmPassword.isNotEmpty() && password != confirmPassword) {
                                 Toast.makeText(context, "Mật khẩu xác nhận không khớp!", Toast.LENGTH_SHORT).show()
@@ -1095,19 +1145,33 @@ fun RegisterScreen(
                                         phoneNumber = phoneNumber,
                                         email = email,
                                         password = password,
-                                        authType = if (isCorporate) "CORPORATE" else "NORMAL"
+                                        authType = if (isCorporate) "CORPORATE" else "NORMAL",
+                                        isCorporate = isCorporate,
+                                        taxCode = if (isCorporate) taxCode else null,
+                                        accountType = if (isCorporate) "CORPORATE" else "PERSONAL"
                                     )
                                     val userInfo = UserInfo(
                                         fullName = fullName,
                                         phoneNumber = phoneNumber,
                                         email = email,
                                         password = password,
-                                        authType = if (isCorporate) "CORPORATE" else "NORMAL"
+                                        authType = if (isCorporate) "CORPORATE" else "NORMAL",
+                                        isCorporate = isCorporate,
+                                        taxCode = if (isCorporate) taxCode else null,
+                                        accountType = if (isCorporate) "CORPORATE" else "PERSONAL"
                                     )
-                                    UserFileManager.saveUser(context, userInfo)
+                                    val isSaveSuccess = if (isCorporate) {
+                                        UserFileManager.saveCorporateUser(context, userInfo)
+                                    } else {
+                                        UserFileManager.savePersonalUser(context, userInfo)
+                                    }
                                     UserFileManager.saveCurrentSessionEmail(context, email)
-                                    val isSuccess = dbHelper.registerUser(newUser)
-                                    if (isSuccess) {
+                                    val isDbSuccess = if (isCorporate) {
+                                        dbHelper.registerCorporateUser(newUser)
+                                    } else {
+                                        dbHelper.registerPersonalUser(newUser)
+                                    }
+                                    if (isSaveSuccess && isDbSuccess) {
                                         Toast.makeText(context, "Đăng Ký Thành Công", Toast.LENGTH_SHORT).show()
                                         onRegisterSuccess()
                                     } else {
@@ -1160,7 +1224,7 @@ fun RegisterScreen(
                     // Nút Đăng ký với Google
                     OutlinedButton(
                         onClick = {
-                            (context.findActivity() as? MainActivity)?.signInWithGoogle(onRegisterSuccess)
+                            (context.findActivity() as? MainActivity)?.signInWithGoogle(onRegisterSuccess, isCorporate)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
@@ -1175,7 +1239,7 @@ fun RegisterScreen(
                             GoogleIcon(modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Đăng ký với Google",
+                                text = if (isCorporate) "Đăng ký với Google Doanh nghiệp" else "Đăng ký với Google Cá nhân",
                                 color = Color(0xFF1E293B),
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 13.sp
@@ -1188,7 +1252,7 @@ fun RegisterScreen(
                     // Nút Đăng ký với Facebook
                     OutlinedButton(
                         onClick = {
-                            (context.findActivity() as? MainActivity)?.signInWithFacebook(onRegisterSuccess)
+                            (context.findActivity() as? MainActivity)?.signInWithFacebook(onRegisterSuccess, isCorporate)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
@@ -1208,7 +1272,7 @@ fun RegisterScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Đăng ký với Facebook",
+                                text = if (isCorporate) "Đăng ký với Facebook Doanh nghiệp" else "Đăng ký với Facebook Cá nhân",
                                 color = Color(0xFF1E293B),
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 13.sp
@@ -1348,32 +1412,7 @@ fun LoginScreen(
         ) {
             Spacer(modifier = Modifier.height(40.dp))
 
-            // Top Bar với nút Quay lại (nếu có)
-            if (onBack != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Quay lại",
-                            tint = Color(0xFF334155),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Text(
-                        text = "Quay lại",
-                        fontSize = 12.sp,
-                        color = Color(0xFF475569),
-                        modifier = Modifier.clickable { onBack() }
-                    )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(10.dp))
 
             // White Card bọc giao diện Login
             Card(
@@ -2102,6 +2141,876 @@ fun LoginScreen(
     }
 }
 
+// ==================== MÀN HÌNH QUẢN LÝ HỢP ĐỒNG (HÌNH 1 - TAB CONTRACTS) ====================
+@Composable
+fun FilterChipItem(
+    label: String,
+    isSelected: Boolean,
+    bgColor: Color,
+    textColor: Color,
+    dotColor: Color? = null,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = if (isSelected) textColor else bgColor,
+        modifier = Modifier.height(36.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (dotColor != null && !isSelected) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(dotColor)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) Color.White else textColor
+            )
+        }
+    }
+}
+
+@Composable
+fun ContractManagementCard(
+    code: String,
+    badgeText: String,
+    badgeBg: Color,
+    badgeTextColor: Color,
+    stripColor: Color,
+    title: String,
+    subtitle: String,
+    footerLeft: String,
+    footerLeftIcon: ImageVector,
+    footerRight: String? = null,
+    footerRightIcon: ImageVector? = null
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = BorderStroke(1.dp, Color(0xFFF1F5F9))
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            // Thanh màu trang trí bên trái
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .fillMaxHeight()
+                    .background(stripColor)
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                // Hàng 1: Mã HĐ + Badge Trạng thái
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = code,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF64748B)
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = badgeBg
+                    ) {
+                        Text(
+                            text = badgeText,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeTextColor,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Tên Hợp Đồng
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Đối tác / Nội bộ
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = Color(0xFF475569)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Footer Row
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = footerLeftIcon,
+                            contentDescription = null,
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = footerLeft,
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+
+                    if (footerRight != null && footerRightIcon != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = footerRightIcon,
+                                contentDescription = null,
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = footerRight,
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ContractManagementScreen(
+    onNavigateToCreateContractAI: () -> Unit = {}
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilterIndex by remember { mutableIntStateOf(0) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 16.dp)
+    ) {
+        // 1. Tiêu đề + Nút + Tạo Hợp đồng Mới
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Quản lý Hợp đồng",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F172A)
+            )
+
+            Button(
+                onClick = onNavigateToCreateContractAI,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = "+ Tạo Hợp đồng Mới",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 2. Thanh Tìm Kiếm
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = {
+                Text(
+                    text = "Tìm kiếm theo mã, tên, đối tác...",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 13.sp
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = Color(0xFF64748B),
+                    modifier = Modifier.size(20.dp)
+                )
+            },
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                focusedBorderColor = Color(0xFF3B82F6),
+                unfocusedBorderColor = Color(0xFFE2E8F0)
+            ),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // 3. Thanh Bộ Lọc (Filter Chips)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChipItem(
+                label = "Tất cả",
+                isSelected = selectedFilterIndex == 0,
+                bgColor = Color(0xFFDBEAFE),
+                textColor = Color(0xFF1D4ED8),
+                onClick = { selectedFilterIndex = 0 }
+            )
+
+            FilterChipItem(
+                label = "Bản nháp",
+                isSelected = selectedFilterIndex == 1,
+                bgColor = Color(0xFFDBEAFE),
+                textColor = Color(0xFF2563EB),
+                dotColor = Color(0xFF64748B),
+                onClick = { selectedFilterIndex = 1 }
+            )
+
+            FilterChipItem(
+                label = "Chờ duyệt",
+                isSelected = selectedFilterIndex == 2,
+                bgColor = Color(0xFFDCFCE7),
+                textColor = Color(0xFF15803D),
+                dotColor = Color(0xFF22C55E),
+                onClick = { selectedFilterIndex = 2 }
+            )
+
+            FilterChipItem(
+                label = "Chờ ký",
+                isSelected = selectedFilterIndex == 3,
+                bgColor = Color(0xFFEEF2FF),
+                textColor = Color(0xFF4338CA),
+                dotColor = Color(0xFF6366F1),
+                onClick = { selectedFilterIndex = 3 }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 4. Danh sách Hợp đồng (Hình 1)
+        ContractManagementCard(
+            code = "#NDA-2023-894",
+            badgeText = "CHỜ KÝ",
+            badgeBg = Color(0xFFEEF2FF),
+            badgeTextColor = Color(0xFF4F46E5),
+            stripColor = Color(0xFF1D4ED8),
+            title = "Thỏa thuận Bảo mật Thông tin (NDA) - TechCorp",
+            subtitle = "Đối tác: TechCorp Inc.",
+            footerLeft = "Hết hạn: 2 ngày",
+            footerLeftIcon = Icons.Default.Schedule,
+            footerRight = "1/2 Đã ký",
+            footerRightIcon = Icons.Default.People
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        ContractManagementCard(
+            code = "#MSA-2023-112",
+            badgeText = "HOÀN TẤT",
+            badgeBg = Color(0xFFDCFCE7),
+            badgeTextColor = Color(0xFF16A34A),
+            stripColor = Color(0xFF16A34A),
+            title = "Hợp đồng Dịch vụ (MSA) - Global Logistics",
+            subtitle = "Đối tác: Global Logistics LLC",
+            footerLeft = "Ký: 15/10/2023",
+            footerLeftIcon = Icons.Default.CalendarToday
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        ContractManagementCard(
+            code = "#EMP-2023-045",
+            badgeText = "BẢN NHÁP",
+            badgeBg = Color(0xFFDBEAFE),
+            badgeTextColor = Color(0xFF2563EB),
+            stripColor = Color(0xFF64748B),
+            title = "Hợp đồng Lao động - Nguyễn Văn A",
+            subtitle = "Nội bộ: HR Dept",
+            footerLeft = "Cập nhật: 2h trước",
+            footerLeftIcon = Icons.Default.Edit
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        ContractManagementCard(
+            code = "#SLA-2023-551",
+            badgeText = "CHỜ DUYỆT",
+            badgeBg = Color(0xFFDCFCE7),
+            badgeTextColor = Color(0xFF059669),
+            stripColor = Color(0xFF10B981),
+            title = "Cam kết Chất lượng Dịch vụ (SLA)",
+            subtitle = "Đối tác: CloudSync Inc.",
+            footerLeft = "Đang chờ Legal Review",
+            footerLeftIcon = Icons.Default.Description
+        )
+
+        Spacer(modifier = Modifier.height(30.dp))
+    }
+}
+
+// ==================== MÀN HÌNH BUSINESS ADMINISTRATION (HÌNH 2 - TAB BUSINESS) ====================
+@Composable
+fun BusinessAdministrationScreen(
+    onAccountClick: () -> Unit = {},
+    onLogoutClick: () -> Unit = {}
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var selectedMode by remember { mutableStateOf("Director") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        // 1. Header (Avatar, SmartContract AI, Bell Notification)
+        DashboardHeader(
+            onAccountClick = onAccountClick,
+            onLogoutClick = onLogoutClick
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 2. Title & Subtitle
+        Text(
+            text = "Business Administration",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF0F172A)
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Manage contracts, team members, and monitor activities.",
+            fontSize = 12.sp,
+            color = Color(0xFF64748B)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 3. Mode Toggle (Director Mode vs Employee Mode)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE0E7FF)),
+            border = BorderStroke(1.dp, Color(0xFFC7D2FE))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Director Mode Button
+                Button(
+                    onClick = { selectedMode = "Director" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedMode == "Director") Color(0xFF1D4ED8) else Color.Transparent
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    elevation = if (selectedMode == "Director") ButtonDefaults.buttonElevation(2.dp) else null,
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "Director Mode",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedMode == "Director") Color.White else Color(0xFF334155)
+                    )
+                }
+
+                // Employee Mode Button
+                Button(
+                    onClick = { selectedMode = "Employee" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedMode == "Employee") Color(0xFF1D4ED8) else Color.Transparent
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    elevation = if (selectedMode == "Employee") ButtonDefaults.buttonElevation(2.dp) else null,
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "Employee Mode",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedMode == "Employee") Color.White else Color(0xFF334155)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 4. Pending Approvals Section (Card)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            border = BorderStroke(1.dp, Color(0xFFF1F5F9))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                // Pending Approvals Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AssignmentTurnedIn,
+                            contentDescription = null,
+                            tint = Color(0xFF1D4ED8),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Pending Approvals",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFDBEAFE)
+                    ) {
+                        Text(
+                            text = "3 Requires Action",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1D4ED8),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Item 1: NDA - TechNova Solutions
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "NDA - TechNova Solutions",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Submitted by: Sarah Jenkins • 2 hours ago",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // AI Risk Badge: Low
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFEEF2FF)
+                        ) {
+                            Text(
+                                text = "🤖 AI Risk: Low",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF4F46E5),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Buttons: Reject vs Approve
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { Toast.makeText(context, "Rejected NDA", Toast.LENGTH_SHORT).show() },
+                                modifier = Modifier.weight(1f),
+                                border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Text("Reject", color = Color(0xFFDC2626), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+
+                            Button(
+                                onClick = { Toast.makeText(context, "Approved NDA", Toast.LENGTH_SHORT).show() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Text("Approve", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Item 2: Vendor Agreement - GlobalSupplies
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "Vendor Agreement - GlobalSupplies",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Submitted by: Michael Chang • 5 hours ago",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // AI Risk Badge: High
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFFEE2E2)
+                        ) {
+                            Text(
+                                text = "⚠️ AI Risk: High (Liability Clause)",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFB91C1C),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Buttons: Reject vs Approve
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { Toast.makeText(context, "Rejected Vendor Agreement", Toast.LENGTH_SHORT).show() },
+                                modifier = Modifier.weight(1f),
+                                border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Text("Reject", color = Color(0xFFDC2626), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+
+                            Button(
+                                onClick = { Toast.makeText(context, "Approved Vendor Agreement", Toast.LENGTH_SHORT).show() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Text("Approve", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Link: View all pending contracts
+                Text(
+                    text = "View all pending contracts",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF1D4ED8),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { Toast.makeText(context, "Viewing all pending contracts", Toast.LENGTH_SHORT).show() }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 5. Team Section (Card)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            border = BorderStroke(1.dp, Color(0xFFF1F5F9))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                // Team Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.People,
+                            contentDescription = null,
+                            tint = Color(0xFF1D4ED8),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Team",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { Toast.makeText(context, "Add team member", Toast.LENGTH_SHORT).show() },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add Member",
+                            tint = Color(0xFF1D4ED8),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Member 1: Sarah Jenkins
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFEEF2FF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("SJ", fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5), fontSize = 13.sp)
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column {
+                            Text("Sarah Jenkins", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text("Legal Counsel", fontSize = 11.sp, color = Color(0xFF64748B))
+                        }
+                    }
+
+                    IconButton(onClick = { }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Member 2: Michael Chang
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFDCFCE7)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("MC", fontWeight = FontWeight.Bold, color = Color(0xFF16A34A), fontSize = 13.sp)
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column {
+                            Text("Michael Chang", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text("Procurement", fontSize = 11.sp, color = Color(0xFF64748B))
+                        }
+                    }
+
+                    IconButton(onClick = { }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Button: Invite via QR
+                OutlinedButton(
+                    onClick = { Toast.makeText(context, "QR Code Invite Scanner", Toast.LENGTH_SHORT).show() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = Color(0xFF0F172A), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Invite via QR", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 6. Audit Log Section (Card)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            border = BorderStroke(1.dp, Color(0xFFF1F5F9))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = null,
+                        tint = Color(0xFF1D4ED8),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Audit Log",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Timeline Log 1
+                Row(verticalAlignment = Alignment.Top) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF16A34A))
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text("Sarah Jenkins approved Employment Agreement.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                        Text("10 mins ago", fontSize = 11.sp, color = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Timeline Log 2
+                Row(verticalAlignment = Alignment.Top) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2563EB))
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text("System AI scanned 5 new vendor contracts.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                        Text("1 hour ago", fontSize = 11.sp, color = Color(0xFF64748B))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Timeline Log 3
+                Row(verticalAlignment = Alignment.Top) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFDC2626))
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text("Michael Chang rejected NDA draft.", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                        Text("3 hours ago", fontSize = 11.sp, color = Color(0xFF64748B))
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(30.dp))
+    }
+}
+
 // ==================== MÀN HÌNH DASHBOARD (SAU ĐĂNG NHẬP / ĐĂNG KÝ) ====================
 @Composable
 fun DashboardScreen(
@@ -2119,77 +3028,103 @@ fun DashboardScreen(
                 selectedTab = selectedTab,
                 onTabSelected = { index ->
                     selectedTab = index
-                    if (index == 1) {
-                        onNavigateToCreateContractAI()
-                    } else if (index == 2) {
+                    if (index == 2) {
                         onNavigateToContractTemplates()
                     }
                 }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    Toast.makeText(context, "Tạo hợp đồng mới với AI Gemini", Toast.LENGTH_SHORT).show()
-                    onNavigateToCreateContractAI()
-                },
-                containerColor = Color(0xFF1D4ED8),
-                contentColor = Color.White,
-                shape = CircleShape
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Tạo hợp đồng mới",
-                    modifier = Modifier.size(26.dp)
-                )
+            if (selectedTab == 0) {
+                FloatingActionButton(
+                    onClick = {
+                        Toast.makeText(context, "Tạo hợp đồng mới với AI Gemini", Toast.LENGTH_SHORT).show()
+                        onNavigateToCreateContractAI()
+                    },
+                    containerColor = Color(0xFF1D4ED8),
+                    contentColor = Color.White,
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Tạo hợp đồng mới",
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
             }
         }
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(Color(0xFFF8FAFC))
-                .verticalScroll(rememberScrollState())
         ) {
-            // 1. Top Header Bar (Avatar, App Title & Notification Bell với Red Dot)
-            DashboardHeader(
-                onAccountClick = {
-                    Toast.makeText(context, "Xem thông tin Tài Khoản", Toast.LENGTH_SHORT).show()
-                    onAccountClick()
-                },
-                onLogoutClick = {
-                    FirebaseAuth.getInstance().signOut()
-                    Toast.makeText(context, "Đã đăng xuất thành công", Toast.LENGTH_SHORT).show()
-                    onLogoutClick()
+            when (selectedTab) {
+                1 -> {
+                    ContractManagementScreen(
+                        onNavigateToCreateContractAI = onNavigateToCreateContractAI
+                    )
                 }
-            )
+                3 -> {
+                    BusinessAdministrationScreen(
+                        onAccountClick = {
+                            Toast.makeText(context, "Xem thông tin Tài Khoản", Toast.LENGTH_SHORT).show()
+                            onAccountClick()
+                        },
+                        onLogoutClick = {
+                            FirebaseAuth.getInstance().signOut()
+                            Toast.makeText(context, "Đã đăng xuất thành công", Toast.LENGTH_SHORT).show()
+                            onLogoutClick()
+                        }
+                    )
+                }
+                else -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFFF8FAFC))
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        // 1. Top Header Bar (Avatar, App Title & Notification Bell với Red Dot)
+                        DashboardHeader(
+                            onAccountClick = {
+                                Toast.makeText(context, "Xem thông tin Tài Khoản", Toast.LENGTH_SHORT).show()
+                                onAccountClick()
+                            },
+                            onLogoutClick = {
+                                FirebaseAuth.getInstance().signOut()
+                                Toast.makeText(context, "Đã đăng xuất thành công", Toast.LENGTH_SHORT).show()
+                                onLogoutClick()
+                            }
+                        )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-            // 2. Greeting Banner (Xin chào, Nguyễn Văn A)
-            DashboardGreetingBanner()
+                    // 2. Greeting Banner (Xin chào, Nguyễn Văn A)
+                    DashboardGreetingBanner()
 
-            Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
-            val currentUser = FirebaseAuth.getInstance().currentUser
-            val currentSessionEmail = UserFileManager.getCurrentSessionEmail(context)
-            val userEmail = currentSessionEmail.ifBlank { currentUser?.email }
+                    val currentUser = FirebaseAuth.getInstance().currentUser
+                    val currentSessionEmail = UserFileManager.getCurrentSessionEmail(context)
+                    val userEmail = currentSessionEmail.ifBlank { currentUser?.email }
 
-            // 3. Tổng quan (4 metric cards cập nhật dữ liệu từ Database theo từng người dùng)
-            DashboardOverviewGrid(userEmail = userEmail)
+                    // 3. Tổng quan (4 metric cards cập nhật dữ liệu từ Database theo từng người dùng)
+                    DashboardOverviewGrid(userEmail = userEmail)
 
-            Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-            // 5. Hợp đồng gần đây (3 recent items với colored left strips)
-            DashboardRecentContracts()
+                    // 5. Hợp đồng gần đây (3 recent items với colored left strips)
+                    DashboardRecentContracts()
 
-            Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-            // 6. Mẫu phổ biến (2 template grid cards)
-            DashboardPopularTemplatesSection()
+                    // 6. Mẫu phổ biến (2 template grid cards)
+                    DashboardPopularTemplatesSection()
 
-            Spacer(modifier = Modifier.height(30.dp))
+                    Spacer(modifier = Modifier.height(30.dp))
+                }
+            }
         }
     }
 }
@@ -2976,6 +3911,7 @@ fun CreateContractOverviewScreen(
                         )
                     }
                 },
+
                 actions = {
                     IconButton(onClick = {
                         Toast.makeText(context, "Tùy chọn màn hình", Toast.LENGTH_SHORT).show()
@@ -3817,22 +4753,6 @@ fun ContractTemplatesScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            // 1. Top Bar (Chỉ giữ nút quay lại, xóa Avatar + Title "SmartContract AI" + Chuông thông báo)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Quay lại",
-                        tint = Color(0xFF334155),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
 
             // 2. Mẫu Hợp Đồng Title & Subtitle & Save template button
             Text(

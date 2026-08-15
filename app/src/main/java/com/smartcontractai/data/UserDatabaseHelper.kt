@@ -11,7 +11,10 @@ data class User(
     val phoneNumber: String,
     val email: String,
     val password: String,
-    val authType: String = "NORMAL"
+    val authType: String = "NORMAL",
+    val isCorporate: Boolean = false,
+    val taxCode: String? = null,
+    val accountType: String = if (isCorporate || authType.startsWith("CORPORATE")) "CORPORATE" else "PERSONAL"
 )
 
 data class UserContractStats(
@@ -25,7 +28,7 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
 
     companion object {
         private const val DATABASE_NAME = "smart_contract_user.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
 
         private const val TABLE_USERS = "users"
         private const val COLUMN_ID = "id"
@@ -33,6 +36,10 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         private const val COLUMN_PHONE = "phone_number"
         private const val COLUMN_EMAIL = "email"
         private const val COLUMN_PASSWORD = "password"
+        private const val COLUMN_AUTH_TYPE = "auth_type"
+        private const val COLUMN_IS_CORPORATE = "is_corporate"
+        private const val COLUMN_TAX_CODE = "tax_code"
+        private const val COLUMN_ACCOUNT_TYPE = "account_type"
 
         // Bảng thông báo
         private const val TABLE_NOTIFICATIONS = "notifications"
@@ -59,7 +66,11 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
                 $COLUMN_FULL_NAME TEXT NOT NULL,
                 $COLUMN_PHONE TEXT NOT NULL,
                 $COLUMN_EMAIL TEXT NOT NULL UNIQUE,
-                $COLUMN_PASSWORD TEXT NOT NULL
+                $COLUMN_PASSWORD TEXT NOT NULL,
+                $COLUMN_AUTH_TYPE TEXT DEFAULT 'NORMAL',
+                $COLUMN_IS_CORPORATE INTEGER DEFAULT 0,
+                $COLUMN_TAX_CODE TEXT,
+                $COLUMN_ACCOUNT_TYPE TEXT DEFAULT 'PERSONAL'
             )
         """.trimIndent()
         db.execSQL(createTableQuery)
@@ -114,26 +125,49 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
             """.trimIndent()
             db.execSQL(createStatsTable)
         }
+        if (oldVersion < 4) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_USERS ADD COLUMN $COLUMN_AUTH_TYPE TEXT DEFAULT 'NORMAL'")
+                db.execSQL("ALTER TABLE $TABLE_USERS ADD COLUMN $COLUMN_IS_CORPORATE INTEGER DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_USERS ADD COLUMN $COLUMN_TAX_CODE TEXT")
+                db.execSQL("ALTER TABLE $TABLE_USERS ADD COLUMN $COLUMN_ACCOUNT_TYPE TEXT DEFAULT 'PERSONAL'")
+            } catch (_: Exception) {}
+        }
     }
 
     // Đăng ký người dùng mới vào Database
     fun registerUser(user: User): Boolean {
         val db = writableDatabase
+        val isCorp = user.isCorporate || user.accountType == "CORPORATE" || user.authType.startsWith("CORPORATE")
         val values = ContentValues().apply {
             put(COLUMN_FULL_NAME, user.fullName)
             put(COLUMN_PHONE, user.phoneNumber)
             put(COLUMN_EMAIL, user.email.trim().lowercase())
             put(COLUMN_PASSWORD, user.password)
+            put(COLUMN_AUTH_TYPE, user.authType)
+            put(COLUMN_IS_CORPORATE, if (isCorp) 1 else 0)
+            put(COLUMN_TAX_CODE, user.taxCode)
+            put(COLUMN_ACCOUNT_TYPE, if (isCorp) "CORPORATE" else "PERSONAL")
         }
 
         return try {
-            val result = db.insert(TABLE_USERS, null, values)
+            val result = db.insertWithOnConflict(TABLE_USERS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
             db.close()
             result != -1L
         } catch (_: Exception) {
             db.close()
             false
         }
+    }
+
+    // Đăng ký tài khoản cá nhân
+    fun registerPersonalUser(user: User): Boolean {
+        return registerUser(user.copy(isCorporate = false, accountType = "PERSONAL"))
+    }
+
+    // Đăng ký tài khoản doanh nghiệp
+    fun registerCorporateUser(user: User): Boolean {
+        return registerUser(user.copy(isCorporate = true, accountType = "CORPORATE"))
     }
 
     // Kiểm tra thông tin đăng nhập với Database
