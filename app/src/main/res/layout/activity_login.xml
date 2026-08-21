@@ -9,21 +9,38 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Login Activity"
+        android:text="Facebook Login"
         android:textSize="20sp"
         android:textStyle="bold" />
+
+    <ImageView
+        android:id="@+id/ivAvatar"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:layout_marginTop="20dp"
+        android:contentDescription="Avatar"
+        android:scaleType="centerCrop"
+        android:src="@drawable/ic_avatar_placeholder" />
 
     <ImageView
         android:id="@+id/imgAvatar"
         android:layout_width="100dp"
         android:layout_height="100dp"
         android:contentDescription="User Avatar"
-        android:scaleType="centerCrop" />
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <com.facebook.login.widget.LoginButton
+        android:id="@+id/btnFbLogin"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp" />
 
     <com.facebook.login.widget.LoginButton
         android:id="@+id/button_facebook_login"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp" />
+        android:layout_marginTop="10dp"
+        android:visibility="gone" />
 
 </LinearLayout>

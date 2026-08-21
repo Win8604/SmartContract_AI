@@ -65,6 +65,8 @@ fun RequestNotificationPermissionIfNeeded(
             }
         }
     } else {
-        onPermissionGranted()
+        LaunchedEffect(Unit) {
+            onPermissionGranted()
+        }
     }
 }

@@ -4,23 +4,23 @@ package com.smartcontractai
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.bumptech.glide.Glide
+import com.facebook.AccessToken
 import com.facebook.CallbackManager
 import com.facebook.FacebookCallback
 import com.facebook.FacebookException
-import com.facebook.login.LoginManager
+import com.facebook.GraphRequest
 import com.facebook.login.LoginResult
+import com.facebook.login.widget.LoginButton
 import com.google.firebase.auth.FacebookAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
-
-import com.facebook.Profile
-import com.facebook.AccessToken
-import com.facebook.GraphRequest
-import com.bumptech.glide.Glide
-import org.json.JSONException
 import com.smartcontractai.databinding.ActivityLoginBinding
+import org.json.JSONException
 
 class LoginActivity : AppCompatActivity() {
 
@@ -34,15 +34,16 @@ class LoginActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         auth = FirebaseAuth.getInstance()
-        callbackManager = CallbackManager.Factory.create()
+        val ivAvatar = binding.ivAvatar
+        val btnFbLogin = binding.btnFbLogin
 
-        // Sự kiện khi bấm nút Đăng nhập Facebook
-        // (Hoặc dùng Nút mặc định com.facebook.login.widget.LoginButton)
-        LoginManager.getInstance().registerCallback(callbackManager, object : FacebookCallback<LoginResult> {
+        callbackManager = CallbackManager.Factory.create()
+        btnFbLogin.setPermissions("public_profile", "email")
+
+        btnFbLogin.registerCallback(callbackManager, object : FacebookCallback<LoginResult> {
             override fun onSuccess(result: LoginResult) {
-                // Đăng nhập Facebook thành công -> Xác thực với Firebase
+                loadFacebookAvatar(result.accessToken, ivAvatar)
                 handleFacebookAccessToken(result.accessToken.token)
-                loadFacebookAvatar()
                 fetchFacebookUserInfo(result.accessToken)
             }
 
@@ -51,50 +52,56 @@ class LoginActivity : AppCompatActivity() {
             }
 
             override fun onError(error: FacebookException) {
-                Toast.makeText(this@LoginActivity, "Lỗi: ${error.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@LoginActivity, error.message ?: "Lỗi Facebook Login", Toast.LENGTH_SHORT).show()
             }
         })
 
-        // Ví dụ gán sự kiện cho Custom Button
-        // btnFacebookLogin.setOnClickListener {
-        //     LoginManager.getInstance().logInWithReadPermissions(this, listOf("email", "public_profile"))
-        // }
-    }
-
-    // Cách 1: Dùng Profile.getCurrentProfile()
-    fun loadFacebookAvatar() {
-        val currentProfile = Profile.getCurrentProfile()
-        if (currentProfile != null) {
-            val avatarUri = currentProfile.getProfilePictureUri(500, 500)
-            // Tải ảnh bằng Glide/Coil vào ImageView
-            Glide.with(this)
-                .load(avatarUri)
-                .placeholder(R.drawable.ic_placeholder)
-                .error(R.drawable.ic_error)
-                .circleCrop()
-                .into(binding.imgAvatar)
+        // Nếu user đã đăng nhập từ trước, tự hiện avatar luôn
+        AccessToken.getCurrentAccessToken()?.let { token ->
+            if (!token.isExpired) {
+                loadFacebookAvatar(token, ivAvatar)
+                loadFacebookAvatarDirectUrl()
+            }
         }
     }
 
-    // Cách 2: Lấy qua GraphRequest
+    private fun loadFacebookAvatar(accessToken: AccessToken, imageView: ImageView) {
+        val request = GraphRequest.newMeRequest(accessToken) { obj, _ ->
+            val id = obj?.optString("id") ?: return@newMeRequest
+            val avatarUrl = "https://graph.facebook.com/$id/picture?type=large&width=200&height=200"
+
+            Glide.with(this@LoginActivity)
+                .load(avatarUrl)
+                .circleCrop()
+                .placeholder(R.drawable.ic_avatar_placeholder)
+                .error(R.drawable.ic_error)
+                .into(imageView)
+        }
+        request.executeAsync()
+    }
+
+    // Cách xin field picture trực tiếp trong Graph API Request
     fun fetchFacebookUserInfo(accessToken: AccessToken) {
         val request = GraphRequest.newMeRequest(accessToken) { jsonObject, _ ->
             try {
                 if (jsonObject != null) {
                     val userId = jsonObject.optString("id")
                     val name = jsonObject.optString("name")
+                    Log.d("FacebookLogin", "Fetched Facebook User: $name ($userId)")
 
                     // Bóc tách URL ảnh avatar từ JSON trả về
                     val pictureObj = jsonObject.optJSONObject("picture")
                     val dataObj = pictureObj?.optJSONObject("data")
-                    val avatarUrl = dataObj?.optString("url")
+                    val rawUrl = dataObj?.optString("url")
+                    val avatarUrl = if (!rawUrl.isNullOrEmpty()) rawUrl else if (userId.isNotEmpty()) "https://graph.facebook.com/$userId/picture?type=large" else null
 
                     // Hiển thị ảnh đại diện lên ImageView
                     if (!avatarUrl.isNullOrEmpty()) {
                         Glide.with(this@LoginActivity)
                             .load(avatarUrl)
                             .circleCrop()
-                            .into(binding.imgAvatar)
+                            .placeholder(R.drawable.ic_avatar_placeholder)
+                            .into(binding.ivAvatar)
                     }
                 }
             } catch (e: JSONException) {
@@ -103,13 +110,14 @@ class LoginActivity : AppCompatActivity() {
         }
 
         val parameters = Bundle().apply {
-            putString("fields", "id,name,email,picture.width(500).height(500)")
+            putString("fields", "id,name,email,picture.type(large)")
         }
         request.parameters = parameters
         request.executeAsync()
     }
 
-    // Cách 3: Dùng URL Graph API trực tiếp qua userId
+    // Lấy URL Graph API trực tiếp từ userId
+    @Suppress("unused")
     fun loadFacebookAvatarDirectUrl() {
         val userId = AccessToken.getCurrentAccessToken()?.userId
         if (userId != null) {
@@ -117,7 +125,8 @@ class LoginActivity : AppCompatActivity() {
             Glide.with(this)
                 .load(avatarUrl)
                 .circleCrop()
-                .into(binding.imgAvatar)
+                .placeholder(R.drawable.ic_avatar_placeholder)
+                .into(binding.ivAvatar)
         }
     }
 
@@ -135,7 +144,6 @@ class LoginActivity : AppCompatActivity() {
                 if (task.isSuccessful) {
                     val user = auth.currentUser
                     Toast.makeText(this, "Đăng nhập thành công: ${user?.displayName}", Toast.LENGTH_SHORT).show()
-                    // Chuyển hướng sang MainActivity
                 } else {
                     val exception = task.exception
                     if (exception is FirebaseAuthUserCollisionException) {

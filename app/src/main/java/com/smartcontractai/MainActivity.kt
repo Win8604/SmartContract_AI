@@ -1,4 +1,4 @@
-@file:Suppress("Deprecation", "UnusedImport", "UNUSED_IMPORT")
+@file:Suppress("Deprecation", "UnusedImport", "UNUSED_IMPORT", "RememberReturnType", "COMPOSABLE_INVOCATION", "ComposableInvocation")
 
 package com.smartcontractai
 
@@ -48,6 +48,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -308,11 +309,14 @@ class MainActivity : FragmentActivity() {
         setContent {
             SmartContractAITheme {
                 // Xin quyền thông báo (Android 13+) & Lấy token FCM liên kết Firebase
-                RequestNotificationPermissionIfNeeded(context = this) {
-                    FCMUtils.fetchFcmToken { token ->
-                        Log.d("FCM_FIREBASE", "FCM Device Token: $token")
+                RequestNotificationPermissionIfNeeded(
+                    context = this,
+                    onPermissionGranted = {
+                        FCMUtils.fetchFcmToken { token ->
+                            Log.d("FCM_FIREBASE", "FCM Device Token: $token")
+                        }
                     }
-                }
+                )
                 AppNavigation()
             }
         }
@@ -357,6 +361,7 @@ class MainActivity : FragmentActivity() {
                     UserFileManager.savePersonalUser(this, userInfo)
                 }
                 UserFileManager.saveCurrentSessionEmail(this, userEmail)
+                UserFileManager.saveRememberMe(this, true, userEmail)
                 if (!dbHelper.isEmailExists(userEmail)) {
                     val newUser = User(
                         fullName = userName,
@@ -490,6 +495,7 @@ class MainActivity : FragmentActivity() {
                 UserFileManager.savePersonalUser(this, userInfo)
             }
             UserFileManager.saveCurrentSessionEmail(this, userEmail)
+            UserFileManager.saveRememberMe(this, true, userEmail)
             if (!dbHelper.isEmailExists(userEmail)) {
                 val newUser = User(
                     fullName = userName,
@@ -643,57 +649,93 @@ object AppColors {
 sealed class Screen {
     object Register : Screen()
     object Login : Screen()
-    object Dashboard : Screen()
+    data class Dashboard(val initialTab: Int = 0) : Screen()
     object CreateContractOverview : Screen()
     object CreateContractWithAI : Screen()
     object ContractTemplates : Screen()
     data class ContractDocumentEditor(val templateTitle: String = "Hợp Đồng Thử Việc (Bản Chuẩn 2024)") : Screen()
+    data class ContractReview(
+        val contractTitle: String = "Hợp Đồng Mới",
+        val initialContent: String = "",
+        val source: String = "AI",
+        val creatorEmail: String? = null
+    ) : Screen()
 }
 
 @Composable
 fun AppNavigation() {
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isAutoLogin = remember { UserFileManager.isRemembered(context) }
+    var currentScreen by remember { mutableStateOf<Screen>(if (isAutoLogin) Screen.Dashboard(0) else Screen.Login) }
 
     when (currentScreen) {
         is Screen.Register -> RegisterScreen(
             onBack = null,
-            onRegisterSuccess = { currentScreen = Screen.Dashboard },
+            onRegisterSuccess = { currentScreen = Screen.Dashboard(0) },
             onNavigateToLogin = { currentScreen = Screen.Login }
         )
         is Screen.Login -> LoginScreen(
             onBack = null,
             onNavigateToRegister = { currentScreen = Screen.Register },
-            onLoginSuccess = { currentScreen = Screen.Dashboard }
+            onLoginSuccess = { currentScreen = Screen.Dashboard(0) }
         )
-        is Screen.Dashboard -> DashboardScreen(
-            onLogoutClick = { currentScreen = Screen.Login },
-            onNavigateToCreateContractAI = { currentScreen = Screen.CreateContractOverview },
-            onNavigateToContractTemplates = { currentScreen = Screen.ContractTemplates }
-        )
+        is Screen.Dashboard -> {
+            val initialTab = (currentScreen as Screen.Dashboard).initialTab
+            DashboardScreen(
+                initialTab = initialTab,
+                onLogoutClick = {
+                    UserFileManager.clearSession(context)
+                    currentScreen = Screen.Login
+                },
+                onNavigateToCreateContractAI = { currentScreen = Screen.CreateContractOverview },
+                onNavigateToContractTemplates = { currentScreen = Screen.ContractTemplates }
+            )
+        }
         is Screen.CreateContractOverview -> CreateContractOverviewScreen(
-            onBack = { currentScreen = Screen.Dashboard },
-            onNavigateToDashboard = { currentScreen = Screen.Dashboard },
+            onBack = { currentScreen = Screen.Dashboard(0) },
+            onNavigateToDashboard = { tab -> currentScreen = Screen.Dashboard(tab) },
             onNavigateToCreateWithAI = { currentScreen = Screen.CreateContractWithAI },
             onNavigateToContractTemplates = { currentScreen = Screen.ContractTemplates }
         )
         is Screen.CreateContractWithAI -> CreateContractWithAIScreen(
             onBack = { currentScreen = Screen.CreateContractOverview },
-            onNavigateToDashboard = { currentScreen = Screen.Dashboard }
+            onNavigateToDashboard = { tab -> currentScreen = Screen.Dashboard(tab) },
+            onNavigateToReview = { title, content ->
+                val currentEmail = UserFileManager.getCurrentSessionEmail(context)
+                currentScreen = Screen.ContractReview(contractTitle = title, initialContent = content, source = "AI", creatorEmail = currentEmail)
+            }
         )
         is Screen.ContractTemplates -> ContractTemplatesScreen(
-            onBack = { currentScreen = Screen.CreateContractOverview },
-            onNavigateToDashboard = { currentScreen = Screen.Dashboard },
-            onNavigateToCreateContractOverview = { currentScreen = Screen.CreateContractOverview },
+            onNavigateToDashboard = { tab -> currentScreen = Screen.Dashboard(tab) },
             onNavigateToCreateWithAI = { currentScreen = Screen.CreateContractWithAI },
             onNavigateToDocumentEditor = { title ->
                 currentScreen = Screen.ContractDocumentEditor(title)
+            },
+            onNavigateToReview = { title, content ->
+                val currentEmail = UserFileManager.getCurrentSessionEmail(context)
+                currentScreen = Screen.ContractReview(contractTitle = title, initialContent = content, source = "Template", creatorEmail = currentEmail)
             }
         )
         is Screen.ContractDocumentEditor -> ContractDocumentEditorScreen(
             templateTitle = (currentScreen as Screen.ContractDocumentEditor).templateTitle,
             onBack = { currentScreen = Screen.ContractTemplates },
-            onNavigateToDashboard = { currentScreen = Screen.Dashboard }
+            onNavigateToDashboard = { tab -> currentScreen = Screen.Dashboard(tab) },
+            onNavigateToReview = { title, content ->
+                val currentEmail = UserFileManager.getCurrentSessionEmail(context)
+                currentScreen = Screen.ContractReview(contractTitle = title, initialContent = content, source = "Template", creatorEmail = currentEmail)
+            }
         )
+        is Screen.ContractReview -> {
+            val reviewScreenState = currentScreen as Screen.ContractReview
+            ContractReviewScreen(
+                contractTitle = reviewScreenState.contractTitle,
+                initialContent = reviewScreenState.initialContent,
+                source = reviewScreenState.source,
+                creatorEmail = reviewScreenState.creatorEmail,
+                onBack = { currentScreen = Screen.Dashboard(0) },
+                onNavigateToDashboard = { tab -> currentScreen = Screen.Dashboard(tab) }
+            )
+        }
     }
 }
 
@@ -750,19 +792,21 @@ fun BottomNavigationBar(selectedTab: Int, onTabSelected: (Int) -> Unit) {
                 unselectedTextColor = Color(0xFF64748B)
             )
         )
-        NavigationBarItem(
-            selected = selectedTab == 3,
-            onClick = { onTabSelected(3) },
-            icon = { Icon(if (selectedTab == 3) Icons.Default.Work else Icons.Outlined.WorkOutline, contentDescription = "Business") },
-            label = { Text("Business", fontSize = 10.sp, fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal) },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = Color.White,
-                selectedTextColor = Color(0xFF1D4ED8),
-                indicatorColor = Color(0xFF1D4ED8),
-                unselectedIconColor = Color(0xFF64748B),
-                unselectedTextColor = Color(0xFF64748B)
+        if (isCorporateUser) {
+            NavigationBarItem(
+                selected = selectedTab == 3,
+                onClick = { onTabSelected(3) },
+                icon = { Icon(if (selectedTab == 3) Icons.Default.Work else Icons.Outlined.WorkOutline, contentDescription = "Corporate") },
+                label = { Text("Corporate", fontSize = 10.sp, fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = Color.White,
+                    selectedTextColor = Color(0xFF1D4ED8),
+                    indicatorColor = Color(0xFF1D4ED8),
+                    unselectedIconColor = Color(0xFF64748B),
+                    unselectedTextColor = Color(0xFF64748B)
+                )
             )
-        )
+        }
         NavigationBarItem(
             selected = selectedTab == 4,
             onClick = { onTabSelected(4) },
@@ -818,7 +862,24 @@ fun RegisterScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(30.dp))
+            if (onBack != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Quay lại",
+                            tint = Color(0xFF1E293B)
+                        )
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(30.dp))
+            }
 
 
 
@@ -1385,10 +1446,19 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var emailOrPhone by remember { mutableStateOf("") }
+    val rememberedEmail = remember { UserFileManager.getRememberedEmail(context) }
+    var emailOrPhone by remember { mutableStateOf(rememberedEmail) }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var rememberMe by remember { mutableStateOf(false) }
+    var rememberMe by remember { mutableStateOf(UserFileManager.isRemembered(context) || rememberedEmail.isNotBlank()) }
+
+    var showForgotPasswordDialog by remember { mutableStateOf(false) }
+    var resetEmailOrPhone by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmNewPassword by remember { mutableStateOf("") }
+    var newPasswordVisible by remember { mutableStateOf(false) }
+    var confirmNewPasswordVisible by remember { mutableStateOf(false) }
+    var resetErrorMessage by remember { mutableStateOf<String?>(null) }
 
     Box(
         modifier = Modifier
@@ -1410,7 +1480,24 @@ fun LoginScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(40.dp))
+            if (onBack != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Quay lại",
+                            tint = Color(0xFF1E293B)
+                        )
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(40.dp))
+            }
 
 
 
@@ -1566,7 +1653,186 @@ fun LoginScreen(
                             color = Color(0xFF1D4ED8),
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clickable {
-                                Toast.makeText(context, "Tính năng Quên mật khẩu", Toast.LENGTH_SHORT).show()
+                                resetEmailOrPhone = emailOrPhone
+                                newPassword = ""
+                                confirmNewPassword = ""
+                                newPasswordVisible = false
+                                confirmNewPasswordVisible = false
+                                resetErrorMessage = null
+                                showForgotPasswordDialog = true
+                            }
+                        )
+                    }
+
+                    // Dialog Đặt lại mật khẩu (Quên mật khẩu)
+                    if (showForgotPasswordDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showForgotPasswordDialog = false },
+                            icon = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFEFF6FF)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Lock,
+                                        contentDescription = null,
+                                        tint = Color(0xFF1D4ED8),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            },
+                            title = {
+                                Text(
+                                    text = "Đặt lại mật khẩu",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A),
+                                    textAlign = TextAlign.Center
+                                )
+                            },
+                            text = {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        text = "Nhập Email/SĐT tài khoản và mật khẩu mới để tiến hành cập nhật lại mật khẩu:",
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF64748B),
+                                        modifier = Modifier.padding(bottom = 12.dp)
+                                    )
+
+                                    // Field 1: Email / SĐT
+                                    InputFieldLabel(text = "Email hoặc Số điện thoại")
+                                    OutlinedTextField(
+                                        value = resetEmailOrPhone,
+                                        onValueChange = {
+                                            resetEmailOrPhone = it
+                                            resetErrorMessage = null
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        placeholder = { Text("Nhập email hoặc SĐT", color = Color(0xFF94A3B8), fontSize = 12.sp) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = customTextFieldColors(),
+                                        singleLine = true
+                                    )
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Field 2: Mật khẩu mới
+                                    InputFieldLabel(text = "Mật khẩu mới")
+                                    OutlinedTextField(
+                                        value = newPassword,
+                                        onValueChange = {
+                                            newPassword = it
+                                            resetErrorMessage = null
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        placeholder = { Text("Nhập mật khẩu mới", color = Color(0xFF94A3B8), fontSize = 12.sp) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        visualTransformation = if (newPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                        trailingIcon = {
+                                            IconButton(onClick = { newPasswordVisible = !newPasswordVisible }) {
+                                                Icon(
+                                                    imageVector = if (newPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF64748B)
+                                                )
+                                            }
+                                        },
+                                        colors = customTextFieldColors(),
+                                        singleLine = true
+                                    )
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Field 3: Xác nhận mật khẩu mới
+                                    InputFieldLabel(text = "Xác nhận mật khẩu mới")
+                                    OutlinedTextField(
+                                        value = confirmNewPassword,
+                                        onValueChange = {
+                                            confirmNewPassword = it
+                                            resetErrorMessage = null
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        placeholder = { Text("Nhập lại mật khẩu mới", color = Color(0xFF94A3B8), fontSize = 12.sp) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        visualTransformation = if (confirmNewPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                        trailingIcon = {
+                                            IconButton(onClick = { confirmNewPasswordVisible = !confirmNewPasswordVisible }) {
+                                                Icon(
+                                                    imageVector = if (confirmNewPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF64748B)
+                                                )
+                                            }
+                                        },
+                                        colors = customTextFieldColors(),
+                                        singleLine = true
+                                    )
+
+                                    if (resetErrorMessage != null) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = resetErrorMessage!!,
+                                            color = Color(0xFFEF4444),
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        val dbHelper = UserDatabaseHelper(context)
+                                        val existsInFile = UserFileManager.checkUserExists(context, resetEmailOrPhone)
+                                        val existsInDb = dbHelper.isEmailExists(resetEmailOrPhone)
+
+                                        when {
+                                            resetEmailOrPhone.isBlank() -> {
+                                                resetErrorMessage = "Vui lòng nhập Email hoặc SĐT!"
+                                            }
+                                            newPassword.isBlank() -> {
+                                                resetErrorMessage = "Vui lòng nhập mật khẩu mới!"
+                                            }
+                                            newPassword.length < 6 -> {
+                                                resetErrorMessage = "Mật khẩu mới phải có ít nhất 6 ký tự!"
+                                            }
+                                            confirmNewPassword != newPassword -> {
+                                                resetErrorMessage = "Mật khẩu xác nhận không trùng khớp!"
+                                            }
+                                            !existsInFile && !existsInDb -> {
+                                                resetErrorMessage = "Không tìm thấy tài khoản với Email/SĐT này!"
+                                            }
+                                            else -> {
+                                                val updatedFile = UserFileManager.updatePassword(context, resetEmailOrPhone, newPassword)
+                                                val updatedDb = dbHelper.updatePassword(resetEmailOrPhone, newPassword)
+
+                                                if (updatedFile || updatedDb) {
+                                                    emailOrPhone = resetEmailOrPhone
+                                                    password = newPassword
+                                                    showForgotPasswordDialog = false
+                                                    Toast.makeText(context, "Cập nhật mật khẩu thành công! Mời bạn đăng nhập.", Toast.LENGTH_LONG).show()
+                                                } else {
+                                                    resetErrorMessage = "Không thể cập nhật mật khẩu, vui lòng thử lại sau!"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Đổi mật khẩu", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            },
+                            dismissButton = {
+                                OutlinedButton(
+                                    onClick = { showForgotPasswordDialog = false },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Hủy", color = Color(0xFF64748B), fontSize = 13.sp)
+                                }
                             }
                         )
                     }
@@ -1589,6 +1855,7 @@ fun LoginScreen(
                                     val isDbMatched = dbHelper.checkUserLogin(emailOrPhone, password)
                                     if (isFileMatched || isDbMatched) {
                                         UserFileManager.saveCurrentSessionEmail(context, emailOrPhone)
+                                        UserFileManager.saveRememberMe(context, rememberMe, emailOrPhone)
                                         Toast.makeText(context, "Đăng Nhập Thành Công", Toast.LENGTH_SHORT).show()
                                         onLoginSuccess()
                                     } else {
@@ -1764,17 +2031,16 @@ fun LoginScreen(
                             val registeredUsers = UserFileManager.getAllUsers(context)
                             val lastUserEmail = registeredUsers.lastOrNull { it.email.isNotBlank() }?.email
                             val deviceGmail = try {
-                                val am = android.accounts.AccountManager.get(context)
-                                am.getAccountsByType("com.google").firstOrNull()?.name
+                                val am = context.getSystemService(android.accounts.AccountManager::class.java)
+                                am?.getAccountsByType("com.google")?.firstOrNull()?.name
                             } catch (_: Exception) { null }
 
-                            when {
-                                emailOrPhone.isNotBlank() -> emailOrPhone
-                                !currentUser?.email.isNullOrBlank() -> currentUser.email!!
-                                sessionEmail.isNotBlank() -> sessionEmail
-                                !lastUserEmail.isNullOrBlank() -> lastUserEmail
-                                !deviceGmail.isNullOrBlank() -> deviceGmail
-                                else -> "user.google@gmail.com"
+                            emailOrPhone.ifBlank {
+                                currentUser?.email?.ifBlank { null }
+                                    ?: sessionEmail.ifBlank { null }
+                                    ?: lastUserEmail?.ifBlank { null }
+                                    ?: deviceGmail?.ifBlank { null }
+                                    ?: "user.google@gmail.com"
                             }
                         }
                         val secretKey = remember(accountName) {
@@ -2066,6 +2332,7 @@ fun LoginScreen(
                                         onClick = {
                                             if (totpCode.length == 6) {
                                                 UserFileManager.saveCurrentSessionEmail(context, accountName)
+                                                UserFileManager.saveRememberMe(context, rememberMe, accountName)
                                                 showTotpDialog = false
                                                 Toast.makeText(context, "Xác thực Google Authenticator thành công!", Toast.LENGTH_SHORT).show()
                                                 onLoginSuccess()
@@ -3011,2481 +3278,1022 @@ fun BusinessAdministrationScreen(
     }
 }
 
-// ==================== MÀN HÌNH DASHBOARD (SAU ĐĂNG NHẬP / ĐĂNG KÝ) ====================
-@Composable
-fun DashboardScreen(
-    onAccountClick: () -> Unit = {},
-    onLogoutClick: () -> Unit = {},
-    onNavigateToCreateContractAI: () -> Unit = {},
-    onNavigateToContractTemplates: () -> Unit = {}
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) }
-
-    Scaffold(
-        bottomBar = {
-            BottomNavigationBar(
-                selectedTab = selectedTab,
-                onTabSelected = { index ->
-                    selectedTab = index
-                    if (index == 2) {
-                        onNavigateToContractTemplates()
-                    }
-                }
-            )
-        },
-        floatingActionButton = {
-            if (selectedTab == 0) {
-                FloatingActionButton(
-                    onClick = {
-                        Toast.makeText(context, "Tạo hợp đồng mới với AI Gemini", Toast.LENGTH_SHORT).show()
-                        onNavigateToCreateContractAI()
-                    },
-                    containerColor = Color(0xFF1D4ED8),
-                    contentColor = Color.White,
-                    shape = CircleShape
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Tạo hợp đồng mới",
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-            }
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            when (selectedTab) {
-                1 -> {
-                    ContractManagementScreen(
-                        onNavigateToCreateContractAI = onNavigateToCreateContractAI
-                    )
-                }
-                3 -> {
-                    BusinessAdministrationScreen(
-                        onAccountClick = {
-                            Toast.makeText(context, "Xem thông tin Tài Khoản", Toast.LENGTH_SHORT).show()
-                            onAccountClick()
-                        },
-                        onLogoutClick = {
-                            FirebaseAuth.getInstance().signOut()
-                            Toast.makeText(context, "Đã đăng xuất thành công", Toast.LENGTH_SHORT).show()
-                            onLogoutClick()
-                        }
-                    )
-                }
-                else -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFFF8FAFC))
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        // 1. Top Header Bar (Avatar, App Title & Notification Bell với Red Dot)
-                        DashboardHeader(
-                            onAccountClick = {
-                                Toast.makeText(context, "Xem thông tin Tài Khoản", Toast.LENGTH_SHORT).show()
-                                onAccountClick()
-                            },
-                            onLogoutClick = {
-                                FirebaseAuth.getInstance().signOut()
-                                Toast.makeText(context, "Đã đăng xuất thành công", Toast.LENGTH_SHORT).show()
-                                onLogoutClick()
-                            }
-                        )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // 2. Greeting Banner (Xin chào, Nguyễn Văn A)
-                    DashboardGreetingBanner()
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    val currentUser = FirebaseAuth.getInstance().currentUser
-                    val currentSessionEmail = UserFileManager.getCurrentSessionEmail(context)
-                    val userEmail = currentSessionEmail.ifBlank { currentUser?.email }
-
-                    // 3. Tổng quan (4 metric cards cập nhật dữ liệu từ Database theo từng người dùng)
-                    DashboardOverviewGrid(userEmail = userEmail)
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // 5. Hợp đồng gần đây (3 recent items với colored left strips)
-                    DashboardRecentContracts()
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // 6. Mẫu phổ biến (2 template grid cards)
-                    DashboardPopularTemplatesSection()
-
-                    Spacer(modifier = Modifier.height(30.dp))
-                }
-            }
-        }
-    }
-}
-
-data class AppNotification(
-    val id: String,
-    val title: String,
-    val message: String,
-    val time: String,
-    val isUnread: Boolean = true
-)
-
-@Composable
-fun DashboardHeader(
-    onAccountClick: () -> Unit = {},
-    onLogoutClick: () -> Unit = {}
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var menuExpanded by remember { mutableStateOf(false) }
-    var showNotificationMenu by remember { mutableStateOf(false) }
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val currentSessionEmail = UserFileManager.getCurrentSessionEmail(context)
-    val userEmail = currentSessionEmail.ifBlank { currentUser?.email }
-
-    val userInfo = remember(userEmail, currentUser) {
-        if (!userEmail.isNullOrEmpty()) {
-            UserFileManager.getUserByEmail(context, userEmail)
-        } else null
-    }
-
-    val avatarUrl: String? = remember(userInfo, currentUser) {
-        when {
-            !userInfo?.avatarUrl.isNullOrEmpty() -> userInfo.avatarUrl
-            currentUser?.photoUrl != null -> currentUser.photoUrl.toString()
-            else -> null
-        }
-    }
-
-    // Nạp danh sách thông báo từ SQLite database cho người dùng hiện tại
-    LaunchedEffect(userEmail) {
-        NotificationRepository.loadFromDatabase(context, userEmail)
-        // Hệ thống tự động lưu thông báo ban đầu vào Database cho người dùng khi mở ứng dụng
-        if (NotificationRepository.notifications.value.isEmpty()) {
-            NotificationRepository.addNotification(
-                context = context,
-                title = "Chào mừng bạn đến với SmartContract AI",
-                message = "Hệ thống trợ lý AI đã sẵn sàng hỗ trợ tạo và phân tích rủi ro hợp đồng.",
-                userEmail = userEmail
-            )
-            NotificationRepository.addNotification(
-                context = context,
-                title = "AI Copilot đã hoàn tất rà soát",
-                message = "Phân tích rủi ro hợp đồng Thuê Văn phòng Q1 đã được lưu tự động vào DB.",
-                userEmail = userEmail
-            )
-        }
-    }
-
-    // Real-time Notification Feed tích hợp Database & Firebase FCM
-    val notifications by NotificationRepository.notifications.collectAsState()
-    val unreadCount = notifications.count { it.isUnread }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Avatar Icon/Image
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(Color(0xFFE2E8F0))
-                .clickable { menuExpanded = true },
-            contentAlignment = Alignment.Center
-        ) {
-            if (!avatarUrl.isNullOrEmpty()) {
-                AsyncImage(
-                    model = avatarUrl,
-                    contentDescription = "User Avatar",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = "User Avatar",
-                    tint = Color(0xFF0284C7),
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Tài Khoản", fontSize = 13.sp) },
-                    leadingIcon = {
-                        Icon(imageVector = Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
-                    },
-                    onClick = {
-                        menuExpanded = false
-                        onAccountClick()
-                    }
-                )
-                HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text("Đăng Xuất", fontSize = 13.sp, color = Color(0xFFEF4444)) },
-                    leadingIcon = {
-                        Icon(imageVector = Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(18.dp))
-                    },
-                    onClick = {
-                        menuExpanded = false
-                        onLogoutClick()
-                    }
-                )
-            }
-        }
-
-        // Center App Title
-        Text(
-            text = "SmartContract AI",
-            fontWeight = FontWeight.Bold,
-            fontSize = 17.sp,
-            color = Color(0xFF0038A8)
-        )
-
-        // Notification Bell with Interactive Dropdown Popup
-        Box {
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable { showNotificationMenu = !showNotificationMenu }
-                    .padding(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Notifications,
-                    contentDescription = "Thông báo",
-                    tint = Color(0xFF1E293B),
-                    modifier = Modifier.size(24.dp)
-                )
-                if (unreadCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFEF4444))
-                            .align(Alignment.TopEnd)
-                    )
-                }
-            }
-
-            // Dropdown Pop-up hiển thị danh sách thông báo người dùng đọc trực tiếp từ Database
-            DropdownMenu(
-                expanded = showNotificationMenu,
-                onDismissRequest = { showNotificationMenu = false },
-                modifier = Modifier
-                    .width(310.dp)
-                    .background(Color.White)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Thông báo",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = Color(0xFF0F172A)
-                            )
-                            if (unreadCount > 0) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color(0xFFE0EDFF))
-                                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "$unreadCount mới",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF1D4ED8)
-                                    )
-                                }
-                            }
-                        }
-
-                        if (notifications.isNotEmpty()) {
-                            Text(
-                                text = "Đọc tất cả",
-                                fontSize = 11.sp,
-                                color = Color(0xFF1D4ED8),
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.clickable {
-                                    NotificationRepository.markAllAsRead(context, userEmail)
-                                }
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HorizontalDivider(color = Color(0xFFF1F5F9))
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (notifications.isEmpty()) {
-                        // Phần thông báo để trống tự động
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 20.dp, horizontal = 12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFF1F5F9)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.NotificationsNone,
-                                    contentDescription = null,
-                                    tint = Color(0xFF94A3B8),
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = "Chưa có thông báo nào",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Hệ thống sẽ tự động lưu và cập nhật thông báo từ Database & Firebase tại đây.",
-                                fontSize = 10.5.sp,
-                                color = Color(0xFF64748B),
-                                textAlign = TextAlign.Center,
-                                lineHeight = 15.sp
-                            )
-                        }
-                    } else {
-                        // Khi có thông báo từ Database thì Feed mới hiển thị thông báo
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            notifications.forEach { item ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (item.isUnread) Color(0xFFF8FAFC) else Color.White)
-                                        .clickable {
-                                            NotificationRepository.markAsRead(context, item.id)
-                                        }
-                                        .padding(10.dp),
-                                    verticalAlignment = Alignment.Top
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .padding(top = 4.dp)
-                                            .clip(CircleShape)
-                                            .background(if (item.isUnread) Color(0xFF1D4ED8) else Color.Transparent)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = item.title,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (item.isUnread) FontWeight.Bold else FontWeight.SemiBold,
-                                            color = Color(0xFF0F172A)
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = item.message,
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF64748B),
-                                            lineHeight = 15.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = item.time,
-                                            fontSize = 9.5.sp,
-                                            color = Color(0xFF94A3B8)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DashboardGreetingBanner() {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val currentSessionEmail = UserFileManager.getCurrentSessionEmail(context)
-    val userEmail = currentSessionEmail.ifBlank { currentUser?.email }
-
-    val userInfo = remember(userEmail, currentUser) {
-        if (!userEmail.isNullOrEmpty()) {
-            UserFileManager.getUserByEmail(context, userEmail)
-        } else null
-    }
-
-    val displayName = remember(userInfo, currentUser, userEmail) {
-        when {
-            !userInfo?.fullName.isNullOrBlank() -> userInfo.fullName
-            !currentUser?.displayName.isNullOrBlank() -> currentUser.displayName
-            !userEmail.isNullOrBlank() -> userEmail.substringBefore("@")
-            else -> "Người dùng"
-        }
-    }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F1FF))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Xin chào, ${displayName ?: "Người dùng"}",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Trợ lý AI Gemini đã sẵn sàng hỗ trợ bạn soạn thảo và rà soát hợp đồng hôm nay.",
-                    fontSize = 11.sp,
-                    color = Color(0xFF475569),
-                    lineHeight = 16.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Decorative Vertical Accent Bars
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(
-                    modifier = Modifier
-                        .width(6.dp)
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color(0xFF3B82F6).copy(alpha = 0.4f))
-                )
-                Box(
-                    modifier = Modifier
-                        .width(6.dp)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color(0xFF1D4ED8))
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun DashboardOverviewGrid(userEmail: String? = null) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val dbHelper = remember(context) { UserDatabaseHelper(context) }
-    var stats by remember(userEmail) {
-        mutableStateOf(dbHelper.getUserContractStats(userEmail))
-    }
-
-    LaunchedEffect(userEmail) {
-        stats = dbHelper.getUserContractStats(userEmail)
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-    ) {
-        Text(
-            text = "Tổng quan",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF0F172A)
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Row 1: Hợp đồng của tôi & Chờ duyệt nội bộ
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            OverviewMetricCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.Folder,
-                count = stats.myContractsCount.toString(),
-                label = "Hợp đồng của tôi",
-                countColor = Color(0xFF1D4ED8),
-                isHighlighted = false
-            )
-            OverviewMetricCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.Assignment,
-                count = stats.pendingApprovalCount.toString(),
-                label = "Chờ duyệt nội bộ",
-                countColor = Color(0xFF0F172A),
-                isHighlighted = false
-            )
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Row 2: Chờ ký (Highlighted with red badge dot) & Đã hoàn tất
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            OverviewMetricCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.EditNote,
-                count = stats.pendingSignatureCount.toString(),
-                label = "Chờ ký",
-                countColor = Color(0xFF1D4ED8),
-                isHighlighted = true
-            )
-            OverviewMetricCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.CheckCircleOutline,
-                count = stats.completedCount.toString(),
-                label = "Đã hoàn tất",
-                countColor = Color(0xFF0F172A),
-                isHighlighted = false
-            )
-        }
-    }
-}
-
-@Composable
-fun OverviewMetricCard(
-    modifier: Modifier = Modifier,
-    icon: ImageVector,
-    count: String,
-    label: String,
-    countColor: Color,
-    isHighlighted: Boolean
-) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) Color(0xFFE0EDFF) else Color.White
-        ),
-        border = BorderStroke(1.dp, if (isHighlighted) Color(0xFF3B82F6) else Color(0xFFF1F5F9))
-    ) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            if (isHighlighted) {
-                // Red indicator dot top right
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFEF4444))
-                        .align(Alignment.TopEnd)
-                )
-            }
-
-            Column {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = Color(0xFF334155),
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = count,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = countColor
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = label,
-                    fontSize = 11.sp,
-                    color = Color(0xFF64748B)
-                )
-            }
-        }
-    }
-}
-
-
-
-@Composable
-fun DashboardRecentContracts() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Hợp đồng gần đây",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A)
-            )
-            Text(
-                text = "Xem tất cả",
-                fontSize = 11.sp,
-                color = Color(0xFF1D4ED8),
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Contract Item 1: HĐ Dịch vụ Phần mềm (Red left strip)
-        RecentContractCard(
-            stripColor = Color(0xFFEF4444),
-            badgeBg = Color(0xFFFFE4E6),
-            iconTint = Color(0xFFE11D48),
-            icon = Icons.Outlined.Edit,
-            title = "HĐ Dịch vụ Phần mềm - Công ty...",
-            subtitle = "Cập nhật 2 giờ trước"
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Contract Item 2: HĐ Mua Bán Thiết Bị (Green left strip)
-        RecentContractCard(
-            stripColor = Color(0xFF10B981),
-            badgeBg = Color(0xFFD1FAE5),
-            iconTint = Color(0xFF059669),
-            icon = Icons.Outlined.CheckCircleOutline,
-            title = "HĐ Mua Bán Thiết Bị - CN Miền...",
-            subtitle = "Hoàn tất hôm qua"
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Contract Item 3: Phụ lục 02 - HĐLĐ Nguyễn Thị B (Gray left strip)
-        RecentContractCard(
-            stripColor = Color(0xFF64748B),
-            badgeBg = Color(0xFFE0EDFF),
-            iconTint = Color(0xFF1D4ED8),
-            icon = Icons.Outlined.ReceiptLong,
-            title = "Phụ lục 02 - HĐLĐ Nguyễn Thị B",
-            subtitle = "Cập nhật 2 ngày trước"
-        )
-    }
-}
-
-@Composable
-fun RecentContractCard(
-    stripColor: Color,
-    badgeBg: Color,
-    iconTint: Color,
-    icon: ImageVector,
-    title: String,
-    subtitle: String
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { },
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFF1F5F9))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Left color strip indicator
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .height(60.dp)
-                    .background(stripColor)
-            )
-
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(badgeBg),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = iconTint,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Column {
-                    Text(
-                        text = title,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Outlined.Schedule,
-                            contentDescription = null,
-                            tint = Color(0xFF94A3B8),
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = subtitle,
-                            fontSize = 10.sp,
-                            color = Color(0xFF94A3B8)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DashboardPopularTemplatesSection() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-    ) {
-        Text(
-            text = "Mẫu phổ biến",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF0F172A)
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            PopularTemplateGridCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.Diamond,
-                title = "Thỏa thuận bảo mật (NDA)",
-                usageText = "Dùng 45 lần tuần này"
-            )
-            PopularTemplateGridCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.WorkOutline,
-                title = "Hợp đồng Lao động (Chuẩn)",
-                usageText = "Dùng 32 lần tuần này"
-            )
-        }
-    }
-}
-
-@Composable
-fun PopularTemplateGridCard(
-    modifier: Modifier = Modifier,
-    icon: ImageVector,
-    title: String,
-    usageText: String
-) {
-    Card(
-        modifier = modifier.clickable { },
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFF1F5F9))
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFE0EDFF)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = Color(0xFF1D4ED8),
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = title,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A),
-                lineHeight = 15.sp,
-                maxLines = 2
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = usageText,
-                fontSize = 9.5.sp,
-                color = Color(0xFF94A3B8)
-            )
-        }
-    }
-}
-
-// Previews
-@Preview(showBackground = true)
-@Composable
-fun DashboardScreenPreview() {
-    SmartContractAITheme {
-        DashboardScreen()
-    }
-}
-
-// ==================== MÀN HÌNH KHỞI TẠO NHANH (MÀN HÌNH 1) ====================
+// ==================== DIALOG CÀI ĐẶT XÁC THỰC SINH TRẮC HỌC ====================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CreateContractOverviewScreen(
-    onBack: () -> Unit = {},
-    onNavigateToDashboard: () -> Unit = {},
-    onNavigateToCreateWithAI: () -> Unit = {},
-    onNavigateToContractTemplates: () -> Unit = {}
+fun BiometricSettingsDialog(
+    onDismiss: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var bottomNavTab by remember { mutableIntStateOf(1) } // 1: Contracts selected
+    val prefs = remember { context.getSharedPreferences("biometric_prefs", Context.MODE_PRIVATE) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Tạo Hợp Đồng",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1D4ED8)
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Quay lại",
-                            tint = Color(0xFF1E293B)
-                        )
-                    }
-                },
+    var isBiometricEnabled by remember { mutableStateOf(prefs.getBoolean("biometric_enabled", true)) }
+    var isSignBiometricEnabled by remember { mutableStateOf(prefs.getBoolean("biometric_sign_enabled", true)) }
 
-                actions = {
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Tùy chọn màn hình", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Tùy chọn",
-                            tint = Color(0xFF1E293B)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
-        },
-        bottomBar = {
-            BottomNavigationBar(
-                selectedTab = bottomNavTab,
-                onTabSelected = { index ->
-                    bottomNavTab = index
-                    if (index == 0) {
-                        onNavigateToDashboard()
-                    } else if (index == 2) {
-                        onNavigateToContractTemplates()
-                    }
-                }
-            )
-        },
-        containerColor = Color.White
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            // Phần "Khởi tạo nhanh"
-            Text(
-                text = "Khởi tạo nhanh",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A),
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
+    val biometricManager = remember { BiometricManager.from(context) }
+    val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    val canAuthenticateStatus = remember { biometricManager.canAuthenticate(authenticators) }
 
-            // Card 1: Tạo bằng AI
-            QuickStartItemCard(
-                icon = Icons.Default.AutoAwesome,
-                iconBg = Color(0xFF1D4ED8),
-                iconTint = Color.White,
-                title = "Tạo bằng AI",
-                subtitle = "Nhập yêu cầu bằng văn bản",
-                onClick = onNavigateToCreateWithAI
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Card 2: Nhân bản (10s)
-            QuickStartItemCard(
-                icon = Icons.Outlined.ContentCopy,
-                iconBg = Color(0xFFE2E8F0),
-                iconTint = Color(0xFF1D4ED8),
-                title = "Nhân bản (10s)",
-                subtitle = "Từ hợp đồng đã có",
-                onClick = {
-                    Toast.makeText(context, "Chọn hợp đồng sẵn có để nhân bản", Toast.LENGTH_SHORT).show()
-                }
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Card 3: Từ kho mẫu (Hình 1 đính kèm) -> Chuyển sang màn hình Mẫu Hợp Đồng (Hình 2)!
-            QuickStartItemCard(
-                icon = Icons.Outlined.Description,
-                iconBg = Color(0xFFE2E8F0),
-                iconTint = Color(0xFF1D4ED8),
-                title = "Từ kho mẫu",
-                subtitle = "Điền biến {{Var}}",
-                onClick = onNavigateToContractTemplates
-            )
-        }
-    }
-}
-
-// Hằng số định danh cấu hình Backend API Key cho Gemini AI
-// Khi Backend cấu hình tích hợp GEMINI_API_KEY, AI sẽ tự động kích hoạt tạo hợp đồng thực tế từ Server
-object BackendAIConfig {
-    var GEMINI_API_KEY: String = "" // Để rỗng mặc định chờ Backend tích hợp API Key
-}
-
-// ==================== MÀN HÌNH TẠO BẰNG AI CHUYÊN BIỆT (HÌNH ĐÍNH KÈM) ====================
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CreateContractWithAIScreen(
-    onBack: () -> Unit = {},
-    onNavigateToDashboard: () -> Unit = {}
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var promptText by remember { mutableStateOf("") }
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Văn bản hợp đồng, 1: Thiết lập luồng duyệt
-    var bottomNavTab by remember { mutableIntStateOf(1) } // 1: Contracts selected
-    var isAiGenerating by remember { mutableStateOf(false) } // Chỉ hiển thị khi AI đang hoạt động
-    var generatedContract by remember { mutableStateOf<String?>(null) }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Tạo Hợp Đồng",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1D4ED8)
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Quay lại",
-                            tint = Color(0xFF1E293B)
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Tùy chọn màn hình", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Tùy chọn",
-                            tint = Color(0xFF1E293B)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
-        },
-        bottomBar = {
-            BottomNavigationBar(
-                selectedTab = bottomNavTab,
-                onTabSelected = { index ->
-                    bottomNavTab = index
-                    if (index == 0) {
-                        onNavigateToDashboard()
-                    }
-                }
-            )
-        },
-        containerColor = Color.White
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            // 1. Trợ lý AI Gemini Greeting Chat Bubble
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) {
-                // Avatar icon Gemini
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF4F46E5)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Gemini AI",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                // Chat bubble container
-                Card(
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF))
-                ) {
-                    Text(
-                        text = "Xin chào! Tôi là Gemini Assistant. Hãy mô tả loại hợp đồng bạn muốn tạo (ví dụ: *Hợp đồng dịch vụ IT giữa công ty A và B, thời hạn 1 năm, giá trị 500 triệu*).",
-                        fontSize = 12.5.sp,
-                        color = Color(0xFF334155),
-                        lineHeight = 18.sp,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 2. Khung Nhập Yêu Cầu Hợp Đồng (Input Box Card)
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFCBD5E1))
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp)
-                ) {
-                    TextField(
-                        value = promptText,
-                        onValueChange = { promptText = it },
-                        placeholder = {
-                            Text(
-                                text = "Nhập yêu cầu tạo hợp đồng...",
-                                fontSize = 13.sp,
-                                color = Color(0xFF94A3B8)
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 70.dp),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Icons 📎 🎙️
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            IconButton(
-                                onClick = {
-                                    Toast.makeText(context, "Tải tệp đính kèm", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.AttachFile,
-                                    contentDescription = "Attach",
-                                    tint = Color(0xFF64748B),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    Toast.makeText(context, "Thu âm giọng nói", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Mic,
-                                    contentDescription = "Mic",
-                                    tint = Color(0xFF64748B),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        // Button Gửi -> Kiểm tra xem Backend đã tích hợp GEMINI_API_KEY chưa
-                        Button(
-                            onClick = {
-                                if (promptText.isBlank()) {
-                                    Toast.makeText(context, "Vui lòng nhập yêu cầu tạo hợp đồng", Toast.LENGTH_SHORT).show()
-                                } else if (BackendAIConfig.GEMINI_API_KEY.isBlank()) {
-                                    Toast.makeText(
-                                        context,
-                                        "Chưa thể tạo hợp đồng: Vui lòng cấu hình Gemini API Key từ phía Backend!",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                } else {
-                                    isAiGenerating = true
-                                    Toast.makeText(context, "AI Gemini đang tạo hợp đồng từ API Backend...", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            shape = RoundedCornerShape(20.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Send",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Gửi",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // AI Disclaimer text
-            Text(
-                text = "AI có thể mắc lỗi. Vui lòng kiểm tra lại thông tin.",
-                fontSize = 11.sp,
-                color = Color(0xFF94A3B8),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            // GIAO DIỆN PHÁC THẢO VÀ KẾT QUẢ
-            // 1. Khi đang phác thảo (isAiGenerating == true)
-            AnimatedVisibility(
-                visible = isAiGenerating,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                // Hiệu ứng xoay tròn cho vòng tròn icon
-                val infiniteTransition = rememberInfiniteTransition(label = "rotation")
-                val rotationAngle by infiniteTransition.animateFloat(
-                    initialValue = 0f,
-                    targetValue = 360f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(durationMillis = 1200, easing = LinearEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "circleRotation"
-                )
-
-                // Gọi Gemini API tạo hợp đồng khi có API Key từ Backend
-                LaunchedEffect(isAiGenerating) {
-                    if (isAiGenerating) {
-                        if (BackendAIConfig.GEMINI_API_KEY.isNotBlank()) {
-                            // Khi Backend truyền API Key thực tế vào dự án, AI sẽ gọi API thực và trả kết quả hợp đồng
-                            kotlinx.coroutines.delay(2000.milliseconds)
-                            isAiGenerating = false
-                            generatedContract = "Hợp đồng thực tế được tạo từ Gemini API với yêu cầu: $promptText"
-                        } else {
-                            isAiGenerating = false
-                        }
-                    }
-                }
-
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // Tab selection bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { selectedTab = 0 }
-                                .padding(vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = "Văn bản hợp đồng",
-                                fontSize = 14.sp,
-                                fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedTab == 0) Color(0xFF1D4ED8) else Color(0xFF64748B)
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            if (selectedTab == 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.8f)
-                                        .height(2.5.dp)
-                                        .background(Color(0xFF1D4ED8), shape = RoundedCornerShape(2.dp))
-                                )
-                            } else {
-                                Spacer(modifier = Modifier.height(2.5.dp))
-                            }
-                        }
-
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { selectedTab = 1 }
-                                .padding(vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = "Thiết lập luồng duyệt",
-                                fontSize = 14.sp,
-                                fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedTab == 1) Color(0xFF1D4ED8) else Color(0xFF64748B)
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            if (selectedTab == 1) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.8f)
-                                        .height(2.5.dp)
-                                        .background(Color(0xFF1D4ED8), shape = RoundedCornerShape(2.dp))
-                                )
-                            } else {
-                                Spacer(modifier = Modifier.height(2.5.dp))
-                            }
-                        }
-                    }
-
-                    // Card đang phác thảo với vòng tròn xoay
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 340.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0))
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Spacer(modifier = Modifier.height(30.dp))
-
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    // Sparkle Icon Circle có hiệu ứng xoay còng tròn
-                                    Box(
-                                        modifier = Modifier
-                                            .size(68.dp)
-                                            .graphicsLayer(rotationZ = rotationAngle)
-                                            .border(
-                                                border = BorderStroke(3.dp, Brush.sweepGradient(listOf(Color(0xFF1D4ED8), Color(0xFF93C5FD), Color(0xFF1D4ED8)))),
-                                                shape = CircleShape
-                                            )
-                                            .padding(4.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFEFF6FF)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.AutoAwesome,
-                                            contentDescription = "Drafting AI",
-                                            tint = Color(0xFF1D4ED8),
-                                            modifier = Modifier.size(30.dp)
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                    Text(
-                                        text = "Đang phác thảo hợp đồng...",
-                                        fontSize = 17.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF1D4ED8),
-                                        textAlign = TextAlign.Center
-                                    )
-
-                                    Spacer(modifier = Modifier.height(8.dp))
-
-                                    Text(
-                                        text = "AI đang kết nối tới Gemini API để tạo hợp đồng theo yêu cầu.",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF64748B),
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(30.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            isAiGenerating = false
-                                            Toast.makeText(context, "Đã hủy tiến trình tạo hợp đồng", Toast.LENGTH_SHORT).show()
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth(0.6f)
-                                            .height(46.dp),
-                                        shape = RoundedCornerShape(10.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White)
-                                    ) {
-                                        Text(
-                                            text = "Hủy tiến trình",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color(0xFF1E293B)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        IconButton(
-                            onClick = {
-                                Toast.makeText(context, "Tùy chọn menu", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier
-                                .padding(12.dp)
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                                .align(Alignment.TopStart)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Menu,
-                                contentDescription = "Menu",
-                                tint = Color(0xFF1E293B),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
-            }
-
-            // 2. Sau khi AI tạo xong hợp đồng -> Biến mất khung phác thảo và hiện ra hợp đồng do AI tạo
-            AnimatedVisibility(
-                visible = !isAiGenerating && generatedContract != null,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = BorderStroke(1.5.dp, Color(0xFF3B82F6))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.AutoAwesome,
-                                        contentDescription = null,
-                                        tint = Color(0xFF1D4ED8),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Hợp đồng do AI đã tạo",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF1D4ED8)
-                                    )
-                                }
-
-                                IconButton(onClick = { generatedContract = null }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Đóng",
-                                        tint = Color(0xFF64748B)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0xFFF8FAFC), shape = RoundedCornerShape(8.dp))
-                                    .border(1.dp, Color(0xFFE2E8F0), shape = RoundedCornerShape(8.dp))
-                                    .padding(14.dp)
-                            ) {
-                                Text(
-                                    text = generatedContract ?: "",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF1E293B),
-                                    lineHeight = 18.sp,
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        Toast.makeText(context, "Đã sao chép hợp đồng", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp)
-                                ) {
-                                    Text("Sao chép", fontSize = 12.sp, color = Color(0xFF1D4ED8))
-                                }
-
-                                Button(
-                                    onClick = {
-                                        Toast.makeText(context, "Đã hoàn tất tạo hợp đồng!", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.weight(1.2f),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8))
-                                ) {
-                                    Text("Sử dụng hợp đồng", fontSize = 12.sp, color = Color.White)
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun QuickStartItemCard(
-    icon: ImageVector,
-    iconBg: Color,
-    iconTint: Color,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit = {}
-) {
-    Card(
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
         modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(iconBg),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column {
-                Text(
-                    text = title,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    fontSize = 11.sp,
-                    color = Color(0xFF64748B)
-                )
-            }
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun CreateContractWithAIScreenPreview() {
-    SmartContractAITheme {
-        CreateContractWithAIScreen()
-    }
-}
-
-// ==================== MÀN HÌNH KHO MẪU HỢP ĐỒNG (HÌNH 2 ĐÍNH KÈM) ====================
-data class ContractTemplateModel(
-    val id: String,
-    val title: String,
-    val description: String,
-    val category: String,
-    val scope: String, // "Công khai", "Doanh nghiệp", "Cá nhân"
-    val badgeText: String?,
-    val isAiOptimized: Boolean = false,
-    val usageCount: String,
-    val timeAgo: String,
-    val icon: ImageVector,
-    val isPrimaryButton: Boolean = false
-)
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ContractTemplatesScreen(
-    onBack: () -> Unit = {},
-    onNavigateToDashboard: () -> Unit = {},
-    onNavigateToCreateContractOverview: () -> Unit = {},
-    onNavigateToCreateWithAI: () -> Unit = {},
-    onNavigateToDocumentEditor: (String) -> Unit = {}
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var selectedScopeTab by remember { mutableIntStateOf(0) } // 0: Công khai, 1: Doanh nghiệp, 2: Cá nhân
-    var selectedCategory by remember { mutableStateOf("Tất cả") }
-    var bottomNavTab by remember { mutableIntStateOf(2) } // 2: Templates selected
-
-    val categories = listOf("Tất cả", "Lao động & Nhân sự", "NDA", "Dịch vụ & IT", "Bất động sản", "Mua bán")
-
-    val allTemplates = remember {
-        listOf(
-            ContractTemplateModel(
-                id = "1",
-                title = "Hợp Đồng Thử Việc (Bản Chuẩn 2024)",
-                description = "Mẫu hợp đồng thử việc cập nhật theo luật lao động mới nhất, phù hợp cho nhân sự văn...",
-                category = "Lao động & Nhân sự",
-                scope = "Công khai",
-                badgeText = "✨ AI Tối ưu",
-                isAiOptimized = true,
-                usageCount = "1.2k lượt dùng",
-                timeAgo = "2 ngày trước",
-                icon = Icons.Outlined.Badge,
-                isPrimaryButton = true
-            ),
-            ContractTemplateModel(
-                id = "2",
-                title = "Thỏa Thuận Bảo Mật Thông Tin (NDA) Dành Cho Đối Tác",
-                description = "Bảo vệ tài sản trí tuệ và bí mật kinh doanh khi hợp tác với bên thứ ba hoặc nhà thầu độc lập.",
-                category = "NDA",
-                scope = "Công khai",
-                badgeText = "NDA",
-                isAiOptimized = false,
-                usageCount = "850 lượt dùng",
-                timeAgo = "1 tuần trước",
-                icon = Icons.Outlined.EditNote,
-                isPrimaryButton = false
-            ),
-            ContractTemplateModel(
-                id = "3",
-                title = "Hợp Đồng Phát Triển Phần Mềm (Outsource)",
-                description = "Mẫu hợp đồng thuê ngoài phát triển ứng dụng, quy định rõ về mốc thời gian, nghiệm thu và sở...",
-                category = "Dịch vụ & IT",
-                scope = "Công khai",
-                badgeText = "IT",
-                isAiOptimized = false,
-                usageCount = "420 lượt dùng",
-                timeAgo = "1 tháng trước",
-                icon = Icons.Outlined.Laptop,
-                isPrimaryButton = false
-            ),
-            ContractTemplateModel(
-                id = "4",
-                title = "Hợp Đồng Cho Thuê Văn Phòng / Mặt Bằng",
-                description = "Điều khoản thuê mặt bằng thương mại, bảo vệ quyền lợi bên thuê và cho thuê đầy đủ pháp lý.",
-                category = "Bất động sản",
-                scope = "Doanh nghiệp",
-                badgeText = "Bất động sản",
-                isAiOptimized = false,
-                usageCount = "630 lượt dùng",
-                timeAgo = "3 ngày trước",
-                icon = Icons.Outlined.Apartment,
-                isPrimaryButton = false
-            ),
-            ContractTemplateModel(
-                id = "5",
-                title = "Hợp Đồng Mua Bán Hàng Hóa Thương Mại",
-                description = "Quy định điều khoản giao hàng, thanh toán, bảo hành và phạt vi phạm hợp đồng thương mại.",
-                category = "Mua bán",
-                scope = "Doanh nghiệp",
-                badgeText = "Thương mại",
-                isAiOptimized = false,
-                usageCount = "910 lượt dùng",
-                timeAgo = "5 ngày trước",
-                icon = Icons.Outlined.ShoppingBag,
-                isPrimaryButton = false
-            )
-        )
-    }
-
-    val filteredTemplates = remember(selectedScopeTab, selectedCategory) {
-        allTemplates.filter { template ->
-            val scopeMatches = when (selectedScopeTab) {
-                0 -> template.scope == "Công khai" || template.scope == "Doanh nghiệp" || template.scope == "Cá nhân"
-                1 -> template.scope == "Doanh nghiệp"
-                else -> template.scope == "Cá nhân"
-            }
-            val categoryMatches = if (selectedCategory == "Tất cả") true else template.category == selectedCategory
-            scopeMatches && categoryMatches
-        }
-    }
-
-    Scaffold(
-        bottomBar = {
-            BottomNavigationBar(
-                selectedTab = bottomNavTab,
-                onTabSelected = { index ->
-                    bottomNavTab = index
-                    if (index == 0) {
-                        onNavigateToDashboard()
-                    } else if (index == 1) {
-                        onNavigateToCreateContractOverview()
-                    }
-                }
-            )
-        },
-        containerColor = Color(0xFFF8FAFC)
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-
-            // 2. Mẫu Hợp Đồng Title & Subtitle & Save template button
-            Text(
-                text = "Mẫu Hợp Đồng",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A)
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Khám phá và sử dụng các mẫu hợp đồng chuẩn được AI tối ưu hóa.",
-                fontSize = 13.sp,
-                color = Color(0xFF64748B)
-            )
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Action Buttons: "Lưu mẫu mới" & "Tạo bằng AI"
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = {
-                        Toast.makeText(context, "Lưu mẫu mới từ bản nháp thành công", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AddCircleOutline,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Lưu mẫu mới",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onNavigateToCreateWithAI,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color(0xFF1D4ED8)),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFFEFF6FF)),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = Color(0xFF1D4ED8),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Tạo bằng AI",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1D4ED8)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 3. Segmented Control / Scope Selector ("Công khai", "Doanh nghiệp", "Cá nhân")
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    val scopeTabs = listOf("Công khai", "Doanh nghiệp", "Cá nhân")
-                    scopeTabs.forEachIndexed { index, tabTitle ->
-                        val isSelected = selectedScopeTab == index
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) Color(0xFFE0EDFF) else Color.Transparent)
-                                .clickable { selectedScopeTab = index },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = tabTitle,
-                                fontSize = 12.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF475569)
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 4. Horizontal Category Filter Chips Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Tune,
-                    contentDescription = "Bộ lọc",
-                    tint = Color(0xFF64748B),
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable {
-                            Toast.makeText(context, "Mở bộ lọc danh mục", Toast.LENGTH_SHORT).show()
-                        }
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(categories) { category ->
-                        val isSelected = selectedCategory == category
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (isSelected) Color(0xFFDBEAFE) else Color(0xFFF1F5F9))
-                                .clickable { selectedCategory = category }
-                                .padding(horizontal = 14.dp, vertical = 7.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = category,
-                                fontSize = 12.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF475569)
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 5. Template Cards List
-            filteredTemplates.forEach { template ->
-                TemplateCardItem(
-                    template = template,
-                    onUseClick = {
-                        Toast.makeText(context, "Mở hợp đồng mẫu Docs: ${template.title}", Toast.LENGTH_SHORT).show()
-                        onNavigateToDocumentEditor(template.title)
-                    }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-        }
-    }
-}
-
-@Composable
-fun TemplateCardItem(
-    template: ContractTemplateModel,
-    onUseClick: () -> Unit = {}
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            // Header Row: Icon Box + Badge Chip
+            .fillMaxWidth(0.92f)
+            .padding(16.dp),
+        shape = RoundedCornerShape(20.dp),
+        containerColor = Color.White,
+        title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFEFF6FF)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = template.icon,
-                        contentDescription = null,
-                        tint = Color(0xFF1D4ED8),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                if (template.badgeText != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (template.isAiOptimized) Color(0xFFF3E8FF) else Color(0xFFE2E8F0)
-                            )
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFEFF6FF)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = template.badgeText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (template.isAiOptimized) Color(0xFF7E22CE) else Color(0xFF475569)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Title
-            Text(
-                text = template.title,
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A)
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Description
-            Text(
-                text = template.description,
-                fontSize = 12.5.sp,
-                color = Color(0xFF64748B),
-                lineHeight = 18.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Stats Row: Usage count & Time ago
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Outlined.Visibility,
-                        contentDescription = null,
-                        tint = Color(0xFF94A3B8),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = template.usageCount,
-                        fontSize = 11.5.sp,
-                        color = Color(0xFF64748B)
-                    )
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Outlined.Schedule,
-                        contentDescription = null,
-                        tint = Color(0xFF94A3B8),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = template.timeAgo,
-                        fontSize = 11.5.sp,
-                        color = Color(0xFF64748B)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Action Button ("Sử dụng ngay")
-            if (template.isPrimaryButton) {
-                Button(
-                    onClick = onUseClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
-                    contentPadding = PaddingValues(vertical = 10.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = "Sử dụng ngay",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            imageVector = Icons.Outlined.Fingerprint,
                             contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
+                            tint = Color(0xFF1D4ED8),
+                            modifier = Modifier.size(24.dp)
                         )
                     }
-                }
-            } else {
-                OutlinedButton(
-                    onClick = onUseClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
-                    contentPadding = PaddingValues(vertical = 10.dp)
-                ) {
-                    Text(
-                        text = "Sử dụng ngay",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1D4ED8)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun ContractTemplatesScreenPreview() {
-    SmartContractAITheme {
-        ContractTemplatesScreen()
-    }
-}
-
-// ==================== MÀN HÌNH CHỈNH SỬA VĂN BẢN MẪU WORD / DOCS ====================
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ContractDocumentEditorScreen(
-    templateTitle: String = "Hợp Đồng Thử Việc (Bản Chuẩn 2024)",
-    onBack: () -> Unit = {},
-    onNavigateToDashboard: () -> Unit = {}
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var bottomNavTab by remember { mutableIntStateOf(1) } // Contracts selected
-
-    // Form điền biến mẫu hợp đồng (Fillable Fields)
-    var partyBName by remember { mutableStateOf("Nguyễn Văn A") }
-    var partyBId by remember { mutableStateOf("012345678901") }
-    var positionTitle by remember { mutableStateOf("Chuyên viên Lập trình Android") }
-    var salaryAmount by remember { mutableStateOf("15,000,000") }
-    var trialDuration by remember { mutableStateOf("02 tháng (Từ 01/09/2024 đến 01/11/2024)") }
-
-    // Nội dung văn bản hợp đồng mẫu Docs/Word
-    var contractContent by remember(partyBName, partyBId, positionTitle, salaryAmount, trialDuration) {
-        mutableStateOf(
-            """
-            CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
-            Độc lập - Tự do - Hạnh phúc
-            -------------------
-
-            ${templateTitle.uppercase()}
-            Số: 01/2024/HĐTV-AI
-
-            Hôm nay, ngày 01 tháng 09 năm 2024, tại văn phòng trụ sở chính, chúng tôi gồm có:
-
-            BÊN A (BÊN TUYỂN DỤNG): CÔNG TY CỔ PHẦN SMARTCONTRACT AI
-            - Đại diện: Ông Nguyễn Quang Minh
-            - Chức vụ: Giám đốc Điều hành
-            - Mã số thuế: 0312345678
-            - Địa chỉ: Tầng 8, Tòa nhà Innovation Center, Quận 1, TP. Hồ Chí Minh
-
-            BÊN B (BÊN NGƯỜI LAO ĐỘNG):
-            - Ông/Bà: $partyBName
-            - Số CCCD/CMND: $partyBId
-            - Chức danh chuyên môn: $positionTitle
-            - Địa chỉ thường trú: 123 Đường Nguyễn Trãi, Quận 5, TP. Hồ Chí Minh
-
-            Cùng thỏa thuận ký kết Hợp đồng thử việc với các điều khoản sau đây:
-
-            ĐIỀU 1: CÔNG VIỆC VÀ THỜI HẠN THỬ VIỆC
-            1.1. Chức danh công việc: $positionTitle.
-            1.2. Thời hạn thử việc: $trialDuration.
-            1.3. Địa điểm làm việc: Trụ sở chính Bên A hoặc theo sự phân công hợp lý của Quản lý.
-
-            ĐIỀU 2: MỨC LƯƠNG VÀ CHẾ ĐỘ THƯỞNG
-            2.1. Mức lương thử việc: $salaryAmount VNĐ/tháng (Bằng 85% mức lương chính thức).
-            2.2. Hình thức trả lương: Chuyển khoản vào tài khoản ngân hàng của Bên B vào ngày 05 hàng tháng.
-            2.3. Chế độ đãi ngộ: Được hưởng phụ cấp ăn trưa, gửi xe và tham gia các hoạt động đào tạo của Công ty.
-
-            ĐIỀU 3: QUYỀN VÀ NGHĨA VỤ CỦA CÁC BÊN
-            3.1. Bên B có trách nhiệm hoàn thành tốt công việc được giao, chấp hành nội quy lao động của Công ty.
-            3.2. Bên A có trách nhiệm thanh toán đầy đủ và đúng hạn các khoản lương, phụ cấp cho Bên B.
-
-            ĐIỀU 4: ĐIỀU KHOẢN THI HÀNH
-            Hợp đồng này được lập thành 02 (hai) bản có giá trị pháp lý như nhau, mỗi bên giữ 01 bản.
-
-                      ĐẠI DIỆN BÊN A                                   ĐẠI DIỆN BÊN B
-                     (Ký, ghi rõ họ tên)                             (Ký, ghi rõ họ tên)
-
-
-
-                      Nguyễn Quang Minh                                $partyBName
-            """.trimIndent()
-        )
-    }
-
-    var isEditingFormOpen by remember { mutableStateOf(true) }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Outlined.Description,
-                                contentDescription = null,
-                                tint = Color(0xFF1D4ED8),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = templateTitle,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
                         Text(
-                            text = "Định dạng Docs / Word - Người dùng tự điền",
+                            text = "Thiết lập Sinh Trắc Học",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Cấu hình Vân tay / Khuôn mặt đăng nhập nhanh",
                             fontSize = 11.sp,
                             color = Color(0xFF64748B)
                         )
                     }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Quay lại",
-                            tint = Color(0xFF1E293B)
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Đã xuất tệp Word (.docx) thành công!", Toast.LENGTH_LONG).show()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.FileDownload,
-                            contentDescription = "Tải file Word",
-                            tint = Color(0xFF1D4ED8)
-                        )
-                    }
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Đã lưu bản nháp hợp đồng!", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Save,
-                            contentDescription = "Lưu bản nháp",
-                            tint = Color(0xFF16A34A)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
-        },
-        bottomBar = {
-            BottomNavigationBar(
-                selectedTab = bottomNavTab,
-                onTabSelected = { index ->
-                    bottomNavTab = index
-                    if (index == 0) {
-                        onNavigateToDashboard()
-                    }
                 }
-            )
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Đóng",
+                        tint = Color(0xFF64748B)
+                    )
+                }
+            }
         },
-        containerColor = Color(0xFFF1F5F9)
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(12.dp)
-        ) {
-            // 1. Quick Form Input Panel (Bảng tự động điền biến {{Var}} theo mẫu)
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp)
+                HorizontalDivider(color = Color(0xFFF1F5F9), modifier = Modifier.padding(bottom = 14.dp))
+
+                // Hardware Status Banner
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (canAuthenticateStatus == BiometricManager.BIOMETRIC_SUCCESS) Color(0xFFF0FDF4) else Color(0xFFFFFBEB)
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        if (canAuthenticateStatus == BiometricManager.BIOMETRIC_SUCCESS) Color(0xFFBBF7D0) else Color(0xFFFDE68A)
+                    )
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { isEditingFormOpen = !isEditingFormOpen },
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFDBEAFE)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = Color(0xFF1D4ED8),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Điền nhanh thông tin theo mẫu (Form Variables)",
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E3A8A)
-                            )
-                        }
-
                         Icon(
-                            imageVector = if (isEditingFormOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            imageVector = if (canAuthenticateStatus == BiometricManager.BIOMETRIC_SUCCESS) Icons.Default.CheckCircle else Icons.Default.Info,
                             contentDescription = null,
-                            tint = Color(0xFF64748B)
+                            tint = if (canAuthenticateStatus == BiometricManager.BIOMETRIC_SUCCESS) Color(0xFF16A34A) else Color(0xFFD97706),
+                            modifier = Modifier.size(22.dp)
                         )
-                    }
-
-                    if (isEditingFormOpen) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider(color = Color(0xFFE2E8F0))
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        OutlinedTextField(
-                            value = partyBName,
-                            onValueChange = { partyBName = it },
-                            label = { Text("Họ và tên Người lao động (Bên B)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF1D4ED8),
-                                unfocusedBorderColor = Color(0xFFCBD5E1)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = when (canAuthenticateStatus) {
+                                    BiometricManager.BIOMETRIC_SUCCESS -> "Thiết bị sẵn sàng Sinh Trắc Học"
+                                    BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "Chưa đăng ký Vân tay / Face ID"
+                                    BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> "Thiết bị không hỗ trợ Sinh trắc học"
+                                    else -> "Cảm biến sinh trắc học hiện bận"
+                                },
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (canAuthenticateStatus == BiometricManager.BIOMETRIC_SUCCESS) Color(0xFF14532D) else Color(0xFF78350F)
                             )
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = partyBId,
-                                onValueChange = { partyBId = it },
-                                label = { Text("Số CCCD/CMND") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFF1D4ED8),
-                                    unfocusedBorderColor = Color(0xFFCBD5E1)
-                                )
-                            )
-                            OutlinedTextField(
-                                value = salaryAmount,
-                                onValueChange = { salaryAmount = it },
-                                label = { Text("Mức lương (VNĐ)") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFF1D4ED8),
-                                    unfocusedBorderColor = Color(0xFFCBD5E1)
-                                )
+                            Text(
+                                text = when (canAuthenticateStatus) {
+                                    BiometricManager.BIOMETRIC_SUCCESS -> "Cảm biến Fingerprint / Face ID hoạt động bình thường."
+                                    BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "Vui lòng thêm vân tay trong Cài đặt thiết bị."
+                                    else -> "Hệ thống hỗ trợ mã PIN/Mật khẩu thay thế."
+                                },
+                                fontSize = 11.sp,
+                                color = if (canAuthenticateStatus == BiometricManager.BIOMETRIC_SUCCESS) Color(0xFF166534) else Color(0xFF92400E)
                             )
                         }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = positionTitle,
-                            onValueChange = { positionTitle = it },
-                            label = { Text("Chức danh chuyên môn") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF1D4ED8),
-                                unfocusedBorderColor = Color(0xFFCBD5E1)
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = trialDuration,
-                            onValueChange = { trialDuration = it },
-                            label = { Text("Thời hạn thử việc") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF1D4ED8),
-                                unfocusedBorderColor = Color(0xFFCBD5E1)
-                            )
-                        )
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // 2. Word / Docs Format Editing Toolbar (Thanh công cụ định dạng Word)
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0))
-            ) {
+                // Toggle 1: Đăng nhập nhanh
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = {
-                            Toast.makeText(context, "Đã in đậm (Bold)", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Text("B", fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color(0xFF0F172A))
-                        }
-                        IconButton(onClick = {
-                            Toast.makeText(context, "Đã in nghiêng (Italic)", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Text("I", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A))
-                        }
-                        IconButton(onClick = {
-                            Toast.makeText(context, "Đã gạch chân (Underline)", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Text("U", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A))
-                        }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Button(
-                            onClick = {
-                                Toast.makeText(context, "Đã hoàn tất chỉnh sửa văn bản!", Toast.LENGTH_SHORT).show()
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Lưu văn bản", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 3. Word Document Paper View (Trang giấy A4 chứa văn bản hợp đồng trực quan)
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(4.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp)
-                ) {
-                    Text(
-                        text = "Trang Word / Docs - Xem & Chỉnh sửa trực tiếp:",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2563EB),
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = contractContent,
-                        onValueChange = { contractContent = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 500.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF3B82F6),
-                            unfocusedBorderColor = Color(0xFFE2E8F0),
-                            focusedContainerColor = Color(0xFFFAFAFA),
-                            unfocusedContainerColor = Color.White
-                        ),
-                        textStyle = androidx.compose.ui.text.TextStyle(
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Đăng nhập nhanh bằng Sinh Trắc Học",
                             fontSize = 13.sp,
-                            lineHeight = 20.sp,
-                            color = Color(0xFF1E293B)
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Sử dụng Vân tay hoặc Face ID thay cho Mật khẩu khi mở ứng dụng",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = isBiometricEnabled,
+                        onCheckedChange = { checked ->
+                            if (checked) {
+                                val activity = context.findActivity() as? MainActivity
+                                activity?.showBiometricPrompt {
+                                    isBiometricEnabled = true
+                                    prefs.edit { putBoolean("biometric_enabled", true) }
+                                }
+                            } else {
+                                isBiometricEnabled = false
+                                prefs.edit { putBoolean("biometric_enabled", false) }
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF1D4ED8)
                         )
                     )
                 }
+
+                HorizontalDivider(color = Color(0xFFF1F5F9), modifier = Modifier.padding(vertical = 8.dp))
+
+                // Toggle 2: Xác thực khi ký & duyệt hợp đồng
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Yêu cầu Vân tay khi Ký & Duyệt Hợp Đồng",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Xác nhận vân tay để hoàn tất ký số hợp đồng AI an toàn 256-bit",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = isSignBiometricEnabled,
+                        onCheckedChange = { checked ->
+                            isSignBiometricEnabled = checked
+                            prefs.edit { putBoolean("biometric_sign_enabled", checked) }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF1D4ED8)
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Test Biometric Authentication Button
+                OutlinedButton(
+                    onClick = {
+                        val activity = context.findActivity() as? MainActivity
+                        if (activity != null) {
+                            activity.showBiometricPrompt {
+                                Toast.makeText(context, "Xác thực sinh trắc học thành công!", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "Sinh trắc học hoạt động bình thường", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1D4ED8))
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Fingerprint,
+                        contentDescription = null,
+                        tint = Color(0xFF1D4ED8),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Thử nghiệm Xác thực ngay",
+                        color = Color(0xFF1D4ED8),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
             }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    prefs.edit {
+                        putBoolean("biometric_enabled", isBiometricEnabled)
+                        putBoolean("biometric_sign_enabled", isSignBiometricEnabled)
+                    }
+                    Toast.makeText(context, "Đã lưu cài đặt Sinh Trắc Học thành công!", Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+            ) {
+                Text("Lưu Cấu Hình", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        },
+        dismissButton = null
+    )
+}
+
+// ==================== DIALOG ĐIỀU KHOẢN & BẢO MẬT ====================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TermsAndPrivacyDialog(
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.92f)
+            .padding(16.dp),
+        shape = RoundedCornerShape(20.dp),
+        containerColor = Color.White,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFEFF6FF)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Security,
+                            contentDescription = null,
+                            tint = Color(0xFF1D4ED8),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Điều Khoản & Bảo Mật",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Quyền riêng tư & bảo vệ dữ liệu SmartContract AI",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Đóng",
+                        tint = Color(0xFF64748B)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                HorizontalDivider(color = Color(0xFFF1F5F9), modifier = Modifier.padding(bottom = 14.dp))
+
+                // Security Standard Banner
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+                    border = BorderStroke(1.dp, Color(0xFFBBF7D0))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF16A34A),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Bảo Mật Chuẩn Ngân Hàng 256-bit AES",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF14532D)
+                            )
+                            Text(
+                                text = "Dữ liệu hợp đồng được mã hóa đầu cuối và tuân thủ Nghị định 13/2023/NĐ-CP.",
+                                fontSize = 11.sp,
+                                color = Color(0xFF166534)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Section 1
+                Text(
+                    text = "1. Điều Khoản Sử Dụng Dịch Vụ",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "SmartContract AI cung cấp giải pháp khởi tạo, phân tích và quản lý hợp đồng thông minh. Người dùng chịu trách nhiệm bảo mật thông tin tài khoản và tính xác thực của tài liệu khi giao dịch.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF475569),
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Section 2
+                Text(
+                    text = "2. Chính Sách Bảo Mật Dữ Liệu",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Chúng tôi cam kết không bán, chia sẻ hoặc tiết lộ nội dung hợp đồng và dữ liệu sinh trắc học của bạn cho bất kỳ bên thứ ba nào ngoại trừ trường hợp có yêu cầu bằng văn bản từ cơ quan pháp luật có thẩm quyền.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF475569),
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Section 3
+                Text(
+                    text = "3. Xử Lý Chữ Ký Số & OTP",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Mọi giao dịch ký số thông qua sinh trắc học (Vân tay/Face ID) hoặc mã OTP đều mang giá trị pháp lý theo Luật Giao Dịch Điện Tử Việt Nam.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF475569),
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "SmartContract AI v1.0.4 • Cập nhật lần cuối: 2026",
+                        fontSize = 11.sp,
+                        color = Color(0xFF64748B),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+            ) {
+                Text("Tôi Đã Hiểu & Đồng Ý", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        },
+        dismissButton = null
+    )
+}
+
+// ==================== MÀN HÌNH SETTINGS ADMINISTRATION (TAB SETTINGS) ====================
+@Composable
+fun SettingsAdministrationScreen(
+    onAccountClick: () -> Unit = {},
+    onLogoutClick: () -> Unit = {}
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val currentEmail = UserFileManager.getCurrentSessionEmail(context)
+    val currentUser = remember(currentEmail) { UserFileManager.getUserByEmail(context, currentEmail) }
+    var showBiometricDialog by remember { mutableStateOf(false) }
+    var showTermsDialog by remember { mutableStateOf(false) }
+
+    val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
+    var isNotificationEnabled by remember { mutableStateOf(prefs.getBoolean("fcm_notifications_enabled", true)) }
+
+    if (showBiometricDialog) {
+        BiometricSettingsDialog(
+            onDismiss = { showBiometricDialog = false }
+        )
+    }
+
+    if (showTermsDialog) {
+        TermsAndPrivacyDialog(
+            onDismiss = { showTermsDialog = false }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8FAFC))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        DashboardHeader(
+            onAccountClick = onAccountClick,
+            onLogoutClick = onLogoutClick
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Cài Đặt & Cấu Hình System",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF0F172A)
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Quản lý thông tin tài khoản, cấu hình thông báo và bảo mật.",
+            fontSize = 12.sp,
+            color = Color(0xFF64748B)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFDBEAFE)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "User",
+                        tint = Color(0xFF1D4ED8),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = currentUser?.fullName?.ifBlank { "Người Dùng SmartContract" } ?: "Người Dùng SmartContract",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Text(
+                        text = currentUser?.email ?: currentEmail.ifBlank { "user@smartcontract.ai" },
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = if (currentUser?.isCorporate == true) Color(0xFFEFF6FF) else Color(0xFFF1F5F9),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = if (currentUser?.isCorporate == true) "Tài khoản Doanh Nghiệp (Corporate)" else "Tài khoản Cá Nhân (Personal)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (currentUser?.isCorporate == true) Color(0xFF1D4ED8) else Color(0xFF475569),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "TÙY CHỌN BẢO MẬT & HỆ THỐNG",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF64748B),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+        ) {
+            Column {
+                SettingsItemRow(
+                    icon = Icons.Outlined.Person,
+                    title = "Thông tin cá nhân & Tài khoản",
+                    subtitle = "Cập nhật họ tên, số điện thoại & thông tin công ty",
+                    onClick = {
+                        Toast.makeText(context, "Xem thông tin Tài Khoản", Toast.LENGTH_SHORT).show()
+                        onAccountClick()
+                    }
+                )
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                SettingsItemRow(
+                    icon = Icons.Outlined.Fingerprint,
+                    title = "Xác thực Sinh Trắc Học",
+                    subtitle = "Vân tay / Khuôn mặt đăng nhập nhanh",
+                    onClick = {
+                        showBiometricDialog = true
+                    }
+                )
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                SettingsItemRow(
+                    icon = Icons.Outlined.Notifications,
+                    title = "Thông Báo",
+                    subtitle = "Cấu hình nhận thông báo hợp đồng & duyệt",
+                    trailingContent = {
+                        Switch(
+                            checked = isNotificationEnabled,
+                            onCheckedChange = { checked ->
+                                isNotificationEnabled = checked
+                                prefs.edit { putBoolean("fcm_notifications_enabled", checked) }
+                                Toast.makeText(
+                                    context,
+                                    if (checked) "Đã bật thông báo nhận hợp đồng & duyệt" else "Đã tắt thông báo",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF1D4ED8),
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color(0xFFCBD5E1)
+                            )
+                        )
+                    },
+                    onClick = {
+                        isNotificationEnabled = !isNotificationEnabled
+                        prefs.edit { putBoolean("fcm_notifications_enabled", isNotificationEnabled) }
+                        Toast.makeText(
+                            context,
+                            if (isNotificationEnabled) "Đã bật thông báo nhận hợp đồng & duyệt" else "Đã tắt thông báo",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                )
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                SettingsItemRow(
+                    icon = Icons.Outlined.Security,
+                    title = "Điều Khoản & Bảo Mật",
+                    subtitle = "Chính sách bảo mật SmartContract AI",
+                    onClick = {
+                        showTermsDialog = true
+                    }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = {
+                FirebaseAuth.getInstance().signOut()
+                Toast.makeText(context, "Đã đăng xuất thành công", Toast.LENGTH_SHORT).show()
+                onLogoutClick()
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFEF2F2)),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, Color(0xFFFCA5A5))
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                contentDescription = null,
+                tint = Color(0xFFDC2626),
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Đăng Xuất Tài Khoản",
+                color = Color(0xFFDC2626),
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.height(30.dp))
+    }
+}
+
+@Composable
+fun SettingsItemRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    showChevron: Boolean = true,
+    trailingContent: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = title,
+            tint = Color(0xFF1D4ED8),
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF0F172A)
+            )
+            Text(
+                text = subtitle,
+                fontSize = 11.sp,
+                color = Color(0xFF64748B)
+            )
+        }
+        if (trailingContent != null) {
+            trailingContent()
+        } else if (showChevron) {
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = Color(0xFF94A3B8),
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
 
-@Preview(showBackground = true)
+// ==================== DIALOG HỒ SƠ THÔNG TIN CÁ NHÂN & TÀI KHOẢN ====================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ContractDocumentEditorScreenPreview() {
-    SmartContractAITheme {
-        ContractDocumentEditorScreen()
-    }
+fun UserProfileDialog(
+    onDismiss: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val currentEmail = UserFileManager.getCurrentSessionEmail(context)
+    val firebaseUser = FirebaseAuth.getInstance().currentUser
+    val userEmail = currentEmail.ifBlank { firebaseUser?.email ?: "" }
+    val existingUser = remember(userEmail) { UserFileManager.getUserByEmail(context, userEmail) }
+
+    var fullName by remember { mutableStateOf(existingUser?.fullName ?: firebaseUser?.displayName ?: "Người Dùng SmartContract") }
+    var phoneNumber by remember { mutableStateOf(existingUser?.phoneNumber ?: firebaseUser?.phoneNumber ?: "") }
+    var taxCode by remember { mutableStateOf(existingUser?.taxCode ?: "") }
+    val isCorporate = existingUser?.isCorporate == true || existingUser?.accountType == "CORPORATE" || existingUser?.authType?.startsWith("CORPORATE") == true
+    val authType = existingUser?.authType ?: "NORMAL"
+    val avatarUrl = existingUser?.avatarUrl ?: firebaseUser?.photoUrl?.toString()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.92f)
+            .padding(16.dp),
+        shape = RoundedCornerShape(20.dp),
+        containerColor = Color.White,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFEFF6FF)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color(0xFF1D4ED8),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Thông Tin Cá Nhân & Tài Khoản",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Hồ sơ cá nhân và phân quyền ứng dụng",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Đóng",
+                        tint = Color(0xFF64748B)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                HorizontalDivider(color = Color(0xFFF1F5F9), modifier = Modifier.padding(bottom = 14.dp))
+
+                // Avatar Header Summary
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF8FAFC), shape = RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFDBEAFE)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!avatarUrl.isNullOrEmpty()) {
+                            AsyncImage(
+                                model = avatarUrl,
+                                contentDescription = "Avatar",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Text(
+                                text = fullName.take(1).uppercase(),
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1D4ED8)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = fullName.ifBlank { "Người Dùng SmartContract" },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = userEmail.ifBlank { "Chưa cập nhật email" },
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                color = if (isCorporate) Color(0xFFEFF6FF) else Color(0xFFF1F5F9),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = if (isCorporate) "Doanh Nghiệp" else "Cá Nhân",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCorporate) Color(0xFF1D4ED8) else Color(0xFF475569),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Surface(
+                                color = Color(0xFFF0FDF4),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = authType,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF166534),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Input fields
+                Text(
+                    text = "Họ và tên",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF334155)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = fullName,
+                    onValueChange = { fullName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF1D4ED8),
+                        unfocusedBorderColor = Color(0xFFCBD5E1)
+                    ),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Email tài khoản",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF334155)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = userEmail,
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        disabledBorderColor = Color(0xFFE2E8F0),
+                        disabledTextColor = Color(0xFF64748B)
+                    ),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Số điện thoại liên hệ",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF334155)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = phoneNumber,
+                    onValueChange = { phoneNumber = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    placeholder = { Text("Nhập số điện thoại", fontSize = 13.sp, color = Color(0xFF94A3B8)) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF1D4ED8),
+                        unfocusedBorderColor = Color(0xFFCBD5E1)
+                    ),
+                    singleLine = true
+                )
+
+                if (isCorporate) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Mã số thuế doanh nghiệp",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF334155)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = taxCode,
+                        onValueChange = { taxCode = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        placeholder = { Text("Nhập mã số thuế công ty", fontSize = 13.sp, color = Color(0xFF94A3B8)) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF1D4ED8),
+                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                        ),
+                        singleLine = true
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (userEmail.isNotEmpty()) {
+                        val updatedUser = UserInfo(
+                            id = existingUser?.id ?: 0,
+                            fullName = fullName,
+                            phoneNumber = phoneNumber,
+                            email = userEmail,
+                            password = existingUser?.password ?: "USER_PASSWORD",
+                            authType = authType,
+                            avatarUrl = avatarUrl,
+                            isCorporate = isCorporate,
+                            taxCode = if (isCorporate) taxCode else null,
+                            accountType = if (isCorporate) "CORPORATE" else "PERSONAL"
+                        )
+                        UserFileManager.saveUser(context, updatedUser)
+                        Toast.makeText(context, "Đã cập nhật thông tin cá nhân & tài khoản!", Toast.LENGTH_SHORT).show()
+                    }
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+            ) {
+                Text("Lưu Thay Đổi", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        },
+        dismissButton = null
+    )
 }
+
+
+
+
+
+// Hằng số định danh cấu hình Backend API Key cho Gemini AI
+// Khi Backend cấu hình tích hợp GEMINI_API_KEY, AI sẽ tự động kích hoạt tạo hợp đồng thực tế từ Server
+
+
+

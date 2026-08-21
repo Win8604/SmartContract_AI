@@ -1,5 +1,6 @@
 package com.smartcontractai.service
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
@@ -46,6 +47,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         sendRegistrationToServer(token)
     }
 
+    @SuppressLint("MissingPermission")
     private fun showNotification(
         title: String,
         body: String

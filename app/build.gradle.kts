@@ -30,6 +30,11 @@ android {
         disable += "GradleDependency"
         disable += "UseTomlInstead"
         disable += "DuplicatePlatformDependency"
+        disable += "MissingVersion"
+        disable += "NewerVersionAvailable"
+        disable += "UnusedAttribute"
+        disable += "GradleOverrides"
+        disable += "RemoveExplicitTypeArguments"
     }
 
     buildTypes {
@@ -42,8 +47,8 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
         compose = true
@@ -51,7 +56,7 @@ android {
     }
     //noinspection Deprecation
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
         freeCompilerArgs += listOf(
             "-opt-in=kotlin.RequiresOptIn",
             "-Xsuppress-version-warnings"
@@ -59,6 +64,7 @@ android {
     }
 }
 
+@Suppress("DuplicatePlatformDependency", "DuplicatePlatform")
 dependencies {
     // AndroidX & Core
     implementation(libs.androidx.appcompat)
@@ -67,7 +73,7 @@ dependencies {
     implementation(libs.glide)
 
     // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
+    implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.messaging)
@@ -76,14 +82,16 @@ dependencies {
     // Facebook Android SDK
     implementation(libs.facebook.android.sdk)
 
-    // Compose
+    // Compose BOM & Core UI
     implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.runtime)
+    api(libs.androidx.compose.runtime)
+    api(libs.androidx.compose.runtime.saveable)
+    api(libs.androidx.compose.ui)
+    api(libs.androidx.compose.foundation)
+    api(libs.androidx.compose.material3)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.coil.compose)
@@ -101,7 +109,6 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
-    debugImplementation(platform(libs.androidx.compose.bom))
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -28,7 +28,7 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
 
     companion object {
         private const val DATABASE_NAME = "smart_contract_user.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
 
         private const val TABLE_USERS = "users"
         private const val COLUMN_ID = "id"
@@ -57,6 +57,15 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         private const val COL_PENDING_APPROVAL = "pending_approval"
         private const val COL_PENDING_SIGNATURE = "pending_signature"
         private const val COL_COMPLETED = "completed"
+
+        // Bảng hợp đồng
+        private const val TABLE_CONTRACTS = "user_contracts"
+        private const val COL_CONTRACT_ID = "id"
+        private const val COL_CONTRACT_TITLE = "title"
+        private const val COL_CONTRACT_TYPE = "type"
+        private const val COL_CONTRACT_STATUS = "status"
+        private const val COL_CONTRACT_USER_EMAIL = "user_email"
+        private const val COL_CONTRACT_CREATED_AT = "created_at"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -97,6 +106,18 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
             )
         """.trimIndent()
         db.execSQL(createStatsTable)
+
+        val createContractsTable = """
+            CREATE TABLE IF NOT EXISTS $TABLE_CONTRACTS (
+                $COL_CONTRACT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                $COL_CONTRACT_TITLE TEXT NOT NULL,
+                $COL_CONTRACT_TYPE TEXT NOT NULL,
+                $COL_CONTRACT_STATUS TEXT NOT NULL,
+                $COL_CONTRACT_USER_EMAIL TEXT NOT NULL,
+                $COL_CONTRACT_CREATED_AT TEXT NOT NULL
+            )
+        """.trimIndent()
+        db.execSQL(createContractsTable)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -132,6 +153,19 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
                 db.execSQL("ALTER TABLE $TABLE_USERS ADD COLUMN $COLUMN_TAX_CODE TEXT")
                 db.execSQL("ALTER TABLE $TABLE_USERS ADD COLUMN $COLUMN_ACCOUNT_TYPE TEXT DEFAULT 'PERSONAL'")
             } catch (_: Exception) {}
+        }
+        if (oldVersion < 5) {
+            val createContractsTable = """
+                CREATE TABLE IF NOT EXISTS $TABLE_CONTRACTS (
+                    $COL_CONTRACT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    $COL_CONTRACT_TITLE TEXT NOT NULL,
+                    $COL_CONTRACT_TYPE TEXT NOT NULL,
+                    $COL_CONTRACT_STATUS TEXT NOT NULL,
+                    $COL_CONTRACT_USER_EMAIL TEXT NOT NULL,
+                    $COL_CONTRACT_CREATED_AT TEXT NOT NULL
+                )
+            """.trimIndent()
+            db.execSQL(createContractsTable)
         }
     }
 
@@ -181,15 +215,27 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         return hasUser
     }
 
-    // Kiểm tra xem Email đã tồn tại chưa
+    // Kiểm tra xem Email hoặc SĐT đã tồn tại chưa
     fun isEmailExists(email: String): Boolean {
         val db = readableDatabase
-        val query = "SELECT * FROM $TABLE_USERS WHERE $COLUMN_EMAIL = ?"
-        val cursor = db.rawQuery(query, arrayOf(email.trim().lowercase()))
+        val query = "SELECT * FROM $TABLE_USERS WHERE $COLUMN_EMAIL = ? OR $COLUMN_PHONE = ?"
+        val cursor = db.rawQuery(query, arrayOf(email.trim().lowercase(), email.trim()))
         val exists = cursor.count > 0
         cursor.close()
         db.close()
         return exists
+    }
+
+    // Cập nhật mật khẩu mới cho người dùng
+    fun updatePassword(emailOrPhone: String, newPassword: String): Boolean {
+        val db = writableDatabase
+        val cleanInput = emailOrPhone.trim().lowercase()
+        val values = ContentValues().apply {
+            put(COLUMN_PASSWORD, newPassword)
+        }
+        val rows = db.update(TABLE_USERS, values, "$COLUMN_EMAIL = ? OR $COLUMN_PHONE = ?", arrayOf(cleanInput, cleanInput))
+        db.close()
+        return rows > 0
     }
 
     // Thêm thông báo mới vào Database
@@ -260,7 +306,7 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
 
     // Lấy thông kê số lượng hợp đồng của từng người dùng từ Database
     fun getUserContractStats(userEmail: String?): UserContractStats {
-        val cleanEmail = userEmail?.trim()?.lowercase()?.ifEmpty { null } ?: "guest@smartcontract.ai"
+        val cleanEmail = userEmail?.trim()?.lowercase()?.ifBlank { null } ?: "guest@smartcontract.ai"
         val db = readableDatabase
         val query = "SELECT * FROM $TABLE_CONTRACT_STATS WHERE $COL_STATS_USER_EMAIL = ?"
         val cursor = db.rawQuery(query, arrayOf(cleanEmail))
@@ -312,6 +358,57 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
             db.close()
             false
         }
+    }
+
+    // Thêm hợp đồng mới vào Database
+    fun insertContract(title: String, type: String, status: String, userEmail: String? = null): Boolean {
+        val cleanEmail = userEmail?.trim()?.lowercase()?.ifBlank { null } ?: "guest@smartcontract.ai"
+        val db = writableDatabase
+
+        val createContractsTable = """
+            CREATE TABLE IF NOT EXISTS $TABLE_CONTRACTS (
+                $COL_CONTRACT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                $COL_CONTRACT_TITLE TEXT NOT NULL,
+                $COL_CONTRACT_TYPE TEXT NOT NULL,
+                $COL_CONTRACT_STATUS TEXT NOT NULL,
+                $COL_CONTRACT_USER_EMAIL TEXT NOT NULL,
+                $COL_CONTRACT_CREATED_AT TEXT NOT NULL
+            )
+        """.trimIndent()
+        db.execSQL(createContractsTable)
+
+        val values = ContentValues().apply {
+            put(COL_CONTRACT_TITLE, title)
+            put(COL_CONTRACT_TYPE, type)
+            put(COL_CONTRACT_STATUS, status)
+            put(COL_CONTRACT_USER_EMAIL, cleanEmail)
+            put(COL_CONTRACT_CREATED_AT, System.currentTimeMillis().toString())
+        }
+
+        val result = try {
+            db.insert(TABLE_CONTRACTS, null, values)
+        } catch (_: Exception) {
+            -1L
+        }
+
+        if (result != -1L) {
+            val currentStats = getUserContractStats(cleanEmail)
+            val updatedStats = if (status == "Đã hoàn tất") {
+                currentStats.copy(
+                    myContractsCount = currentStats.myContractsCount + 1,
+                    completedCount = currentStats.completedCount + 1
+                )
+            } else {
+                currentStats.copy(
+                    myContractsCount = currentStats.myContractsCount + 1,
+                    pendingApprovalCount = currentStats.pendingApprovalCount + 1
+                )
+            }
+            saveUserContractStats(cleanEmail, updatedStats)
+        }
+
+        db.close()
+        return result != -1L
     }
 }
 

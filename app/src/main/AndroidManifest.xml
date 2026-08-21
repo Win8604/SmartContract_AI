@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:versionCode="1"
+    android:versionName="1.0">
+
 
     <!-- Internet cho Firebase / Google / Facebook -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -14,6 +18,7 @@
     <application
         android:name="com.smartcontractai.SmartContractApplication"
         android:allowBackup="true"
+        tools:ignore="UnusedAttribute"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -39,7 +44,7 @@
 
         <!-- Firebase Cloud Messaging Service -->
         <service
-            android:name=".service.MyFirebaseMessagingService"
+            android:name="com.smartcontractai.service.MyFirebaseMessagingService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
@@ -91,12 +96,12 @@
 
         <!-- Login Activity -->
         <activity
-            android:name=".LoginActivity"
+            android:name="com.smartcontractai.LoginActivity"
             android:exported="true" />
 
         <!-- Main Activity -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.smartcontractai.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.SmartContractAI"
             android:windowSoftInputMode="adjustResize">

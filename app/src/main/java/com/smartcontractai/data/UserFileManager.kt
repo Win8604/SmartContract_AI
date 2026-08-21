@@ -1,6 +1,7 @@
 package com.smartcontractai.data
 
 import android.content.Context
+import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -108,9 +109,9 @@ object UserFileManager {
                         email = obj.optString("email", ""),
                         password = obj.optString("password", ""),
                         authType = obj.optString("authType", "NORMAL"),
-                        avatarUrl = obj.optString("avatarUrl", "").ifEmpty { null },
+                        avatarUrl = obj.optString("avatarUrl", "").ifBlank { null },
                         isCorporate = isCorp,
-                        taxCode = obj.optString("taxCode", "").ifEmpty { null },
+                        taxCode = obj.optString("taxCode", "").ifBlank { null },
                         accountType = if (isCorp) "CORPORATE" else "PERSONAL"
                     )
                 )
@@ -181,18 +182,39 @@ object UserFileManager {
         }
     }
 
-    // Kiểm tra tài khoản người dùng có tồn tại theo Email không
-    fun checkUserExists(context: Context, email: String): Boolean {
-        return isEmailExists(context, email)
+    // Kiểm tra tài khoản người dùng có tồn tại theo Email hoặc SĐT không
+    fun checkUserExists(context: Context, emailOrPhone: String): Boolean {
+        val cleanInput = emailOrPhone.trim().lowercase()
+        return getAllUsers(context).any {
+            it.email.lowercase() == cleanInput || it.phoneNumber == cleanInput
+        }
+    }
+
+    // Cập nhật mật khẩu mới cho người dùng theo Email/SĐT
+    fun updatePassword(context: Context, emailOrPhone: String, newPassword: String): Boolean {
+        if (emailOrPhone.isBlank() || newPassword.isBlank()) return false
+        val cleanInput = emailOrPhone.trim().lowercase()
+        val users = getAllUsers(context).toMutableList()
+        val userIndex = users.indexOfFirst {
+            it.email.lowercase() == cleanInput || it.phoneNumber == cleanInput
+        }
+        if (userIndex >= 0) {
+            val user = users[userIndex]
+            val updatedUser = user.copy(password = newPassword)
+            return saveUser(context, updatedUser)
+        }
+        return false
     }
 
     private const val PREF_NAME = "user_session_pref"
     private const val KEY_CURRENT_EMAIL = "current_email"
+    private const val KEY_REMEMBER_ME = "remember_me"
+    private const val KEY_REMEMBERED_EMAIL = "remembered_email"
 
     // Lưu email phiên làm việc của người dùng hiện tại
     fun saveCurrentSessionEmail(context: Context, email: String) {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_CURRENT_EMAIL, email.trim().lowercase()).apply()
+        prefs.edit { putString(KEY_CURRENT_EMAIL, email.trim().lowercase()) }
     }
 
     // Lấy email người dùng đang đăng nhập hiện tại
@@ -201,6 +223,48 @@ object UserFileManager {
         if (!firebaseEmail.isNullOrBlank()) return firebaseEmail.trim().lowercase()
 
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_CURRENT_EMAIL, "") ?: ""
+        val saved = prefs.getString(KEY_CURRENT_EMAIL, "") ?: ""
+        return saved.ifBlank { prefs.getString(KEY_REMEMBERED_EMAIL, "") ?: "" }
+    }
+
+    // Ghi nhớ đăng nhập
+    fun saveRememberMe(context: Context, remember: Boolean, email: String = "") {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val cleanEmail = email.trim().lowercase()
+        prefs.edit {
+            putBoolean(KEY_REMEMBER_ME, remember)
+            if (remember && cleanEmail.isNotBlank()) {
+                putString(KEY_REMEMBERED_EMAIL, cleanEmail)
+                putString(KEY_CURRENT_EMAIL, cleanEmail)
+            } else if (!remember) {
+                remove(KEY_REMEMBERED_EMAIL)
+            }
+        }
+    }
+
+    // Kiểm tra xem máy đã được tick "Ghi nhớ đăng nhập" trước đó chưa
+    fun isRemembered(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val isRemember = prefs.getBoolean(KEY_REMEMBER_ME, false)
+        val currentEmail = getCurrentSessionEmail(context)
+        return isRemember && currentEmail.isNotBlank()
+    }
+
+    // Lấy email đã được ghi nhớ
+    fun getRememberedEmail(context: Context): String {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_REMEMBERED_EMAIL, "") ?: ""
+    }
+
+    // Xóa phiên làm việc khi Đăng xuất
+    fun clearSession(context: Context) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit {
+            putBoolean(KEY_REMEMBER_ME, false)
+            remove(KEY_CURRENT_EMAIL)
+        }
+        try {
+            com.google.firebase.auth.FirebaseAuth.getInstance().signOut()
+        } catch (_: Exception) {}
     }
 }
