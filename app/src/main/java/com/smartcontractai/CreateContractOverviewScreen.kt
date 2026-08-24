@@ -202,12 +202,12 @@ fun CreateContractOverviewScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Card 2: Nhân bản (10s)
+            // Card 2: Nhân bản
             QuickStartItemCard(
                 icon = Icons.Outlined.ContentCopy,
                 iconBg = Color(0xFFE2E8F0),
                 iconTint = Color(0xFF1D4ED8),
-                title = "Nhân bản (10s)",
+                title = "Nhân bản",
                 subtitle = "Từ hợp đồng đã có",
                 onClick = {
                     showCloneBottomSheet = true
