@@ -43,6 +43,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,6 +87,8 @@ import com.smartcontractai.data.UserDatabaseHelper
 import com.smartcontractai.data.UserFileManager
 import com.smartcontractai.data.UserInfo
 import com.smartcontractai.ui.theme.SmartContractAITheme
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -299,10 +317,14 @@ class MainActivity : FragmentActivity() {
                 )
             }
 
-        val accessToken = AccessToken.getCurrentAccessToken()
-        val isFacebookLoggedIn = accessToken != null && !accessToken.isExpired
-        if (isFacebookLoggedIn) {
-            Log.d("Facebook", "Facebook AccessToken is active")
+        try {
+            val accessToken = AccessToken.getCurrentAccessToken()
+            val isFacebookLoggedIn = accessToken != null && !accessToken.isExpired
+            if (isFacebookLoggedIn) {
+                Log.d("Facebook", "Facebook AccessToken is active")
+            }
+        } catch (e: Exception) {
+            Log.w("Facebook", "Error checking Facebook AccessToken: ${e.message}")
         }
 
         enableEdgeToEdge()
@@ -519,108 +541,117 @@ class MainActivity : FragmentActivity() {
 
     // ==================== FACEBOOK LOGIN ====================
     private fun setupFacebookCallback() {
-        LoginManager.getInstance().registerCallback(
-            callbackManager,
-            object : FacebookCallback<LoginResult> {
-                override fun onSuccess(result: LoginResult) {
-                    val accessToken = result.accessToken
+        try {
+            LoginManager.getInstance().registerCallback(
+                callbackManager,
+                object : FacebookCallback<LoginResult> {
+                    override fun onSuccess(result: LoginResult) {
+                        val accessToken = result.accessToken
 
-                    // 1. Đăng nhập vào Firebase bằng Facebook Credential
-                    val credential = FacebookAuthProvider.getCredential(accessToken.token)
-                    auth.signInWithCredential(credential)
-                        .addOnCompleteListener(this@MainActivity) { task ->
-                            if (task.isSuccessful) {
-                                val user = auth.currentUser
-                                saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
-                                Toast.makeText(
-                                    this@MainActivity,
-                                    "Đăng nhập Facebook thành công: ${user?.displayName ?: user?.email ?: "User"}",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                facebookSuccessCallback?.invoke()
-                            } else {
-                                val exception = task.exception
-                                if (exception is FirebaseAuthUserCollisionException) {
-                                    val currentUser = auth.currentUser
-                                    if (currentUser != null) {
-                                        currentUser.linkWithCredential(credential).addOnCompleteListener { linkTask ->
-                                            if (linkTask.isSuccessful) {
-                                                saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
-                                                Toast.makeText(this@MainActivity, "Đã liên kết tài khoản Facebook thành công!", Toast.LENGTH_SHORT).show()
-                                                facebookSuccessCallback?.invoke()
-                                            } else {
-                                                Toast.makeText(this@MainActivity, "Liên kết Facebook thất bại: ${linkTask.exception?.message}", Toast.LENGTH_LONG).show()
+                        // 1. Đăng nhập vào Firebase bằng Facebook Credential
+                        val credential = FacebookAuthProvider.getCredential(accessToken.token)
+                        auth.signInWithCredential(credential)
+                            .addOnCompleteListener(this@MainActivity) { task ->
+                                if (task.isSuccessful) {
+                                    val user = auth.currentUser
+                                    saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "Đăng nhập Facebook thành công: ${user?.displayName ?: user?.email ?: "User"}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    facebookSuccessCallback?.invoke()
+                                } else {
+                                    val exception = task.exception
+                                    if (exception is FirebaseAuthUserCollisionException) {
+                                        val currentUser = auth.currentUser
+                                        if (currentUser != null) {
+                                            currentUser.linkWithCredential(credential).addOnCompleteListener { linkTask ->
+                                                if (linkTask.isSuccessful) {
+                                                    saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
+                                                    Toast.makeText(this@MainActivity, "Đã liên kết tài khoản Facebook thành công!", Toast.LENGTH_SHORT).show()
+                                                    facebookSuccessCallback?.invoke()
+                                                } else {
+                                                    Toast.makeText(this@MainActivity, "Liên kết Facebook thất bại: ${linkTask.exception?.message}", Toast.LENGTH_LONG).show()
+                                                }
                                             }
+                                        } else {
+                                            Toast.makeText(
+                                                this@MainActivity,
+                                                "Email này đã được dùng cho tài khoản Google/Email. Vui lòng đăng nhập Google/Email hoặc bật 'Multiple accounts per email' trong Firebase Console.",
+                                                Toast.LENGTH_LONG
+                                            ).show()
                                         }
                                     } else {
                                         Toast.makeText(
                                             this@MainActivity,
-                                            "Email này đã được dùng cho tài khoản Google/Email. Vui lòng đăng nhập Google/Email hoặc bật 'Multiple accounts per email' trong Firebase Console.",
+                                            "Firebase Facebook thất bại: ${exception?.message}",
                                             Toast.LENGTH_LONG
                                         ).show()
                                     }
-                                } else {
-                                    Toast.makeText(
-                                        this@MainActivity,
-                                        "Firebase Facebook thất bại: ${exception?.message}",
-                                        Toast.LENGTH_LONG
-                                    ).show()
                                 }
                             }
+
+                        // 2. Lấy thêm thông tin chi tiết (Email, Name, Avatar) qua Graph API
+                        val request = GraphRequest.newMeRequest(accessToken) { jsonObject, _ ->
+                            if (jsonObject != null) {
+                                val email = jsonObject.optString("email")
+                                val name = jsonObject.optString("name")
+                                val fbId = jsonObject.optString("id")
+                                val pictureObj = jsonObject.optJSONObject("picture")
+                                val dataObj = pictureObj?.optJSONObject("data")
+                                val rawUrl = dataObj?.optString("url")
+                                val avatarUrl = if (!rawUrl.isNullOrEmpty()) rawUrl else if (fbId.isNotEmpty()) "https://graph.facebook.com/$fbId/picture?type=large" else null
+
+                                saveFacebookUserToDb(name, email, avatarUrl, isCorporate = isCorporateSocialAuth)
+                            } else {
+                                saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
+                            }
                         }
-
-                    // 2. Lấy thêm thông tin chi tiết (Email, Name, Avatar) qua Graph API
-                    val request = GraphRequest.newMeRequest(accessToken) { jsonObject, _ ->
-                        if (jsonObject != null) {
-                            val email = jsonObject.optString("email")
-                            val name = jsonObject.optString("name")
-                            val fbId = jsonObject.optString("id")
-                            val pictureObj = jsonObject.optJSONObject("picture")
-                            val dataObj = pictureObj?.optJSONObject("data")
-                            val rawUrl = dataObj?.optString("url")
-                            val avatarUrl = if (!rawUrl.isNullOrEmpty()) rawUrl else if (fbId.isNotEmpty()) "https://graph.facebook.com/$fbId/picture?type=large" else null
-
-                            saveFacebookUserToDb(name, email, avatarUrl, isCorporate = isCorporateSocialAuth)
-                        } else {
-                            saveFacebookUserToDb(isCorporate = isCorporateSocialAuth)
+                        val parameters = Bundle().apply {
+                            putString("fields", "id,name,email,picture.type(large)")
                         }
+                        request.parameters = parameters
+                        request.executeAsync()
                     }
-                    val parameters = Bundle().apply {
-                        putString("fields", "id,name,email,picture.type(large)")
+
+                    override fun onCancel() {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Đã hủy đăng nhập Facebook",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
-                    request.parameters = parameters
-                    request.executeAsync()
-                }
 
-                override fun onCancel() {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Đã hủy đăng nhập Facebook",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    override fun onError(error: FacebookException) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Lỗi Facebook: ${error.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
-
-                override fun onError(error: FacebookException) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Lỗi Facebook: ${error.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        )
+            )
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error setting up Facebook callback", e)
+        }
     }
 
     // Khi người dùng bấm vào nút Facebook trên giao diện:
     fun signInWithFacebook(onSuccess: () -> Unit, isCorporate: Boolean = false) {
-        facebookSuccessCallback = onSuccess
-        isCorporateSocialAuth = isCorporate
-        LoginManager.getInstance().logOut()
-        LoginManager.getInstance().logInWithReadPermissions(
-            this,
-            callbackManager,
-            listOf("public_profile", "email")
-        )
+        try {
+            facebookSuccessCallback = onSuccess
+            isCorporateSocialAuth = isCorporate
+            LoginManager.getInstance().logOut()
+            LoginManager.getInstance().logInWithReadPermissions(
+                this,
+                callbackManager,
+                listOf("public_profile", "email")
+            )
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error initiating Facebook login", e)
+            Toast.makeText(this, "Lỗi kết nối Facebook: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 }
 
@@ -695,7 +726,11 @@ fun AppNavigation() {
             onBack = { currentScreen = Screen.Dashboard(0) },
             onNavigateToDashboard = { tab -> currentScreen = Screen.Dashboard(tab) },
             onNavigateToCreateWithAI = { currentScreen = Screen.CreateContractWithAI },
-            onNavigateToContractTemplates = { currentScreen = Screen.ContractTemplates }
+            onNavigateToContractTemplates = { currentScreen = Screen.ContractTemplates },
+            onNavigateToReview = { title, content ->
+                val currentEmail = UserFileManager.getCurrentSessionEmail(context)
+                currentScreen = Screen.ContractReview(contractTitle = title, initialContent = content, source = "Clone", creatorEmail = currentEmail)
+            }
         )
         is Screen.CreateContractWithAI -> CreateContractWithAIScreen(
             onBack = { currentScreen = Screen.CreateContractOverview },
@@ -4024,7 +4059,75 @@ fun UserProfileDialog(
     var taxCode by remember { mutableStateOf(existingUser?.taxCode ?: "") }
     val isCorporate = existingUser?.isCorporate == true || existingUser?.accountType == "CORPORATE" || existingUser?.authType?.startsWith("CORPORATE") == true
     val authType = existingUser?.authType ?: "NORMAL"
-    val avatarUrl = existingUser?.avatarUrl ?: firebaseUser?.photoUrl?.toString()
+    var avatarUrl by remember { mutableStateOf(existingUser?.avatarUrl ?: firebaseUser?.photoUrl?.toString()) }
+
+    var showUrlDialog by remember { mutableStateOf(false) }
+    var tempUrlInput by remember { mutableStateOf("") }
+
+    val avatarPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            avatarUrl = it.toString()
+            Toast.makeText(context, "Đã chọn ảnh đại diện mới!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    if (showUrlDialog) {
+        AlertDialog(
+            onDismissRequest = { showUrlDialog = false },
+            title = {
+                Text(
+                    text = "Nhập URL Hình Ảnh Avatar",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Dán liên kết hình ảnh trực tuyến (HTTP/HTTPS):",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = tempUrlInput,
+                        onValueChange = { tempUrlInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("https://example.com/avatar.png", fontSize = 12.sp, color = Color(0xFF94A3B8)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF1D4ED8),
+                            unfocusedBorderColor = Color(0xFFCBD5E1)
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        avatarUrl = tempUrlInput.trim().ifBlank { null }
+                        showUrlDialog = false
+                        Toast.makeText(context, "Đã cập nhật liên kết avatar!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Đồng Ý", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUrlDialog = false }) {
+                    Text("Hủy", color = Color(0xFF64748B))
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -4097,26 +4200,49 @@ fun UserProfileDialog(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFDBEAFE)),
-                        contentAlignment = Alignment.Center
+                            .size(60.dp)
+                            .clickable { avatarPickerLauncher.launch("image/*") },
+                        contentAlignment = Alignment.BottomEnd
                     ) {
-                        if (!avatarUrl.isNullOrEmpty()) {
-                            AsyncImage(
-                                model = avatarUrl,
-                                contentDescription = "Avatar",
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Text(
-                                text = fullName.take(1).uppercase(),
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1D4ED8)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(Color(0xFFDBEAFE)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (!avatarUrl.isNullOrEmpty()) {
+                                AsyncImage(
+                                    model = avatarUrl,
+                                    contentDescription = "Avatar",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Text(
+                                    text = fullName.take(1).uppercase(),
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1D4ED8)
+                                )
+                            }
+                        }
+                        // Camera Badge
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF1D4ED8))
+                                .border(1.5.dp, Color.White, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = "Đổi Avatar",
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
                             )
                         }
                     }
@@ -4159,6 +4285,72 @@ fun UserProfileDialog(
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
+                        }
+                    }
+                }
+
+                // Avatar Action Buttons Row
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = { avatarPickerLauncher.launch("image/*") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        border = BorderStroke(1.dp, Color(0xFF1D4ED8))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = null,
+                            tint = Color(0xFF1D4ED8),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Tải ảnh lên", fontSize = 11.sp, color = Color(0xFF1D4ED8), fontWeight = FontWeight.SemiBold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            tempUrlInput = avatarUrl ?: ""
+                            showUrlDialog = true
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        border = BorderStroke(1.dp, Color(0xFF64748B))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Link,
+                            contentDescription = null,
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Nhập URL", fontSize = 11.sp, color = Color(0xFF64748B), fontWeight = FontWeight.SemiBold)
+                    }
+
+                    if (!avatarUrl.isNullOrEmpty()) {
+                        IconButton(
+                            onClick = {
+                                avatarUrl = null
+                                Toast.makeText(context, "Đã gỡ ảnh đại diện", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = "Gỡ ảnh",
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }

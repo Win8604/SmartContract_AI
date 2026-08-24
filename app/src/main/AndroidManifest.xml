@@ -17,6 +17,7 @@
 
     <application
         android:name="com.smartcontractai.SmartContractApplication"
+        android:usesCleartextTraffic="true"
         android:allowBackup="true"
         tools:ignore="UnusedAttribute"
         android:dataExtractionRules="@xml/data_extraction_rules"

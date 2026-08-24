@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,6 +38,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -115,10 +117,12 @@ fun CreateContractOverviewScreen(
     onBack: () -> Unit = {},
     onNavigateToDashboard: (Int) -> Unit = {},
     onNavigateToCreateWithAI: () -> Unit = {},
-    onNavigateToContractTemplates: () -> Unit = {}
+    onNavigateToContractTemplates: () -> Unit = {},
+    onNavigateToReview: (title: String, content: String) -> Unit = { _, _ -> }
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var bottomNavTab by remember { mutableIntStateOf(1) } // 1: Contracts selected
+    var showCloneBottomSheet by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -169,7 +173,7 @@ fun CreateContractOverviewScreen(
             )
         },
         containerColor = Color.White
-    ) { innerPadding ->
+    ) { innerPadding: PaddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -206,7 +210,7 @@ fun CreateContractOverviewScreen(
                 title = "Nhân bản (10s)",
                 subtitle = "Từ hợp đồng đã có",
                 onClick = {
-                    Toast.makeText(context, "Chọn hợp đồng sẵn có để nhân bản", Toast.LENGTH_SHORT).show()
+                    showCloneBottomSheet = true
                 }
             )
 
@@ -220,6 +224,16 @@ fun CreateContractOverviewScreen(
                 title = "Từ kho mẫu",
                 subtitle = "Điền biến {{Var}}",
                 onClick = onNavigateToContractTemplates
+            )
+        }
+
+        if (showCloneBottomSheet) {
+            CloneContractBottomSheet(
+                onDismissRequest = { showCloneBottomSheet = false },
+                onContractCloned = { newTitle, newContent ->
+                    showCloneBottomSheet = false
+                    onNavigateToReview(newTitle, newContent)
+                }
             )
         }
     }

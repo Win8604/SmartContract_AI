@@ -22,6 +22,22 @@ object NotificationRepository {
         _notifications.value = list
     }
 
+    // Đồng bộ thông báo mới từ PostgreSQL Backend Server
+    fun refresh(context: Context, userEmail: String? = null) {
+        val email = if (!userEmail.isNullOrBlank()) userEmail else UserFileManager.getCurrentSessionEmail(context)
+        loadFromDatabase(context, email)
+
+        com.smartcontractai.network.ApiClient.fetchNotificationsFromPostgres(email) { success, items ->
+            if (success && items.isNotEmpty()) {
+                val dbHelper = UserDatabaseHelper(context.applicationContext)
+                items.forEach { item ->
+                    dbHelper.saveNotification(item.id, email, item.title, item.message, item.time, item.isUnread)
+                }
+                _notifications.value = items
+            }
+        }
+    }
+
     // Tự động thêm thông báo mới vào Database và tự động cập nhật Notification Feed UI
     fun addNotification(context: Context, title: String, message: String, userEmail: String? = null, timeText: String? = null) {
         val time = timeText ?: getCurrentTime()
@@ -35,12 +51,14 @@ object NotificationRepository {
         _notifications.value = updatedList
     }
 
-    // Tự động cập nhật tất cả thông báo thành đã đọc trong Database và UI
+    // Tự động cập nhật tất cả thông báo thành đã đọc trong Database, UI và PostgreSQL Backend
     fun markAllAsRead(context: Context, userEmail: String? = null) {
         val email = if (!userEmail.isNullOrBlank()) userEmail else UserFileManager.getCurrentSessionEmail(context)
         val dbHelper = UserDatabaseHelper(context.applicationContext)
         dbHelper.markAllNotificationsAsRead(email)
         _notifications.value = _notifications.value.map { it.copy(isUnread = false) }
+
+        com.smartcontractai.network.ApiClient.markAllNotificationsReadOnPostgres(email) { _ -> }
     }
 
     // Tự động cập nhật 1 thông báo thành đã đọc trong Database và UI

@@ -24,6 +24,24 @@ data class UserContractStats(
     val completedCount: Int = 0
 )
 
+data class UserContractItem(
+    val id: Int = 0,
+    val title: String,
+    val type: String,
+    val status: String,
+    val userEmail: String,
+    val createdAt: String
+)
+
+data class PopularTemplateModel(
+    val id: String = "1",
+    val title: String,
+    val usageText: String,
+    val category: String = "NDA",
+    val usageCount: Int = 0
+)
+
+
 class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
@@ -280,6 +298,40 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         }
         cursor.close()
         db.close()
+
+        if (list.isEmpty()) {
+            val defaultNotifs = listOf(
+                com.smartcontractai.AppNotification(
+                    id = "101",
+                    title = "AI Copilot đã hoàn tất rà soát",
+                    message = "Phân tích rủi ro hợp đồng Thuê văn phòng Q1 đã được lưu tự động vào DB.",
+                    time = "21:31",
+                    isUnread = true
+                ),
+                com.smartcontractai.AppNotification(
+                    id = "100",
+                    title = "Chào mừng bạn đến với SmartContract AI",
+                    message = "Hệ thống trợ lý AI đã sẵn sàng hỗ trợ tạo và phân tích rủi ro hợp đồng.",
+                    time = "21:30",
+                    isUnread = true
+                )
+            )
+            val dbWrite = writableDatabase
+            defaultNotifs.forEach { notif ->
+                val values = ContentValues().apply {
+                    put(COL_NOTIF_ID, notif.id)
+                    put(COL_NOTIF_USER_EMAIL, email)
+                    put(COL_NOTIF_TITLE, notif.title)
+                    put(COL_NOTIF_MESSAGE, notif.message)
+                    put(COL_NOTIF_TIME, notif.time)
+                    put(COL_NOTIF_IS_UNREAD, if (notif.isUnread) 1 else 0)
+                }
+                dbWrite.insertWithOnConflict(TABLE_NOTIFICATIONS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            dbWrite.close()
+            return defaultNotifs
+        }
+
         return list
     }
 
@@ -304,10 +356,48 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         db.close()
     }
 
-    // Lấy thông kê số lượng hợp đồng của từng người dùng từ Database
+    // Lấy thông kê số lượng hợp đồng của từng người dùng từ Database / PostgreSQL
     fun getUserContractStats(userEmail: String?): UserContractStats {
         val cleanEmail = userEmail?.trim()?.lowercase()?.ifBlank { null } ?: "guest@smartcontract.ai"
         val db = readableDatabase
+
+        // 1. Tính toán số liệu thực tế từ danh sách hợp đồng lưu trong bảng user_contracts (nếu có)
+        try {
+            val contractsQuery = "SELECT $COL_CONTRACT_STATUS, COUNT(*) as cnt FROM $TABLE_CONTRACTS WHERE $COL_CONTRACT_USER_EMAIL = ? GROUP BY $COL_CONTRACT_STATUS"
+            val cursorContracts = db.rawQuery(contractsQuery, arrayOf(cleanEmail))
+
+            if (cursorContracts.moveToFirst()) {
+                var total = 0
+                var pendingApp = 0
+                var pendingSig = 0
+                var completed = 0
+
+                do {
+                    val status = cursorContracts.getString(0) ?: ""
+                    val count = cursorContracts.getInt(1)
+                    total += count
+                    when {
+                        status.contains("hoàn tất", ignoreCase = true) || status.contains("đã ký", ignoreCase = true) || status.contains("completed", ignoreCase = true) -> completed += count
+                        status.contains("chờ ký", ignoreCase = true) || status.contains("ký", ignoreCase = true) || status.contains("signature", ignoreCase = true) -> pendingSig += count
+                        else -> pendingApp += count
+                    }
+                } while (cursorContracts.moveToNext())
+                cursorContracts.close()
+
+                if (total > 0) {
+                    val liveStats = UserContractStats(total, pendingApp, pendingSig, completed)
+                    saveUserContractStats(cleanEmail, liveStats)
+                    db.close()
+                    return liveStats
+                }
+            } else {
+                cursorContracts.close()
+            }
+        } catch (_: Exception) {
+            // Trường hợp truy vấn bảng hợp đồng gặp sự cố, chuyển tiếp qua đọc cache từ TABLE_CONTRACT_STATS
+        }
+
+        // 2. Lấy dữ liệu thống kê lưu trong bảng user_contract_stats (đã được đồng bộ với PostgreSQL Backend)
         val query = "SELECT * FROM $TABLE_CONTRACT_STATS WHERE $COL_STATS_USER_EMAIL = ?"
         val cursor = db.rawQuery(query, arrayOf(cleanEmail))
 
@@ -323,18 +413,8 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         cursor.close()
         db.close()
 
-        // Nếu chưa có trong Database, tự động tạo dữ liệu mẫu khởi tạo cho từng user và lưu lại vào Database
-        val hash = kotlin.math.abs(cleanEmail.hashCode())
-        val defaultStats = if (cleanEmail == "guest@smartcontract.ai") {
-            UserContractStats(124, 12, 5, 89)
-        } else {
-            val myContracts = 10 + (hash % 120)
-            val pendingApproval = 1 + (hash % 15)
-            val pendingSignature = 1 + (hash % 10)
-            val completed = (myContracts * 0.7).toInt()
-            UserContractStats(myContracts, pendingApproval, pendingSignature, completed)
-        }
-
+        // 3. Trả về thống kê mặc định (0) nếu tài khoản mới chưa có dữ liệu và lưu lại Database
+        val defaultStats = UserContractStats(0, 0, 0, 0)
         saveUserContractStats(cleanEmail, defaultStats)
         return defaultStats
     }
@@ -393,22 +473,171 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
 
         if (result != -1L) {
             val currentStats = getUserContractStats(cleanEmail)
-            val updatedStats = if (status == "Đã hoàn tất") {
-                currentStats.copy(
-                    myContractsCount = currentStats.myContractsCount + 1,
-                    completedCount = currentStats.completedCount + 1
-                )
-            } else {
-                currentStats.copy(
-                    myContractsCount = currentStats.myContractsCount + 1,
-                    pendingApprovalCount = currentStats.pendingApprovalCount + 1
-                )
+            val updatedStats = when {
+                status.contains("hoàn tất", ignoreCase = true) || status.contains("đã ký", ignoreCase = true) -> {
+                    currentStats.copy(
+                        myContractsCount = currentStats.myContractsCount + 1,
+                        completedCount = currentStats.completedCount + 1
+                    )
+                }
+                status.contains("ký", ignoreCase = true) -> {
+                    currentStats.copy(
+                        myContractsCount = currentStats.myContractsCount + 1,
+                        pendingSignatureCount = currentStats.pendingSignatureCount + 1
+                    )
+                }
+                else -> {
+                    currentStats.copy(
+                        myContractsCount = currentStats.myContractsCount + 1,
+                        pendingApprovalCount = currentStats.pendingApprovalCount + 1
+                    )
+                }
             }
             saveUserContractStats(cleanEmail, updatedStats)
         }
 
         db.close()
         return result != -1L
+    }
+
+    // Lấy danh sách hợp đồng gần đây của người dùng từ Database
+    fun getRecentContracts(userEmail: String?, limit: Int = 5): List<UserContractItem> {
+        val cleanEmail = userEmail?.trim()?.lowercase()?.ifBlank { null } ?: "guest@smartcontract.ai"
+        val list = mutableListOf<UserContractItem>()
+        val db = readableDatabase
+
+        val createContractsTable = """
+            CREATE TABLE IF NOT EXISTS $TABLE_CONTRACTS (
+                $COL_CONTRACT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                $COL_CONTRACT_TITLE TEXT NOT NULL,
+                $COL_CONTRACT_TYPE TEXT NOT NULL,
+                $COL_CONTRACT_STATUS TEXT NOT NULL,
+                $COL_CONTRACT_USER_EMAIL TEXT NOT NULL,
+                $COL_CONTRACT_CREATED_AT TEXT NOT NULL
+            )
+        """.trimIndent()
+        db.execSQL(createContractsTable)
+
+        val query = "SELECT * FROM $TABLE_CONTRACTS WHERE $COL_CONTRACT_USER_EMAIL = ? ORDER BY $COL_CONTRACT_ID DESC LIMIT ?"
+        val cursor = db.rawQuery(query, arrayOf(cleanEmail, limit.toString()))
+
+        if (cursor.moveToFirst()) {
+            do {
+                val id = cursor.getInt(cursor.getColumnIndexOrThrow(COL_CONTRACT_ID))
+                val title = cursor.getString(cursor.getColumnIndexOrThrow(COL_CONTRACT_TITLE))
+                val type = cursor.getString(cursor.getColumnIndexOrThrow(COL_CONTRACT_TYPE))
+                val status = cursor.getString(cursor.getColumnIndexOrThrow(COL_CONTRACT_STATUS))
+                val email = cursor.getString(cursor.getColumnIndexOrThrow(COL_CONTRACT_USER_EMAIL))
+                val createdAt = cursor.getString(cursor.getColumnIndexOrThrow(COL_CONTRACT_CREATED_AT))
+
+                list.add(UserContractItem(id, title, type, status, email, createdAt))
+            } while (cursor.moveToNext())
+        }
+        cursor.close()
+        db.close()
+
+        // Nếu chưa có hợp đồng nào trong DB, khởi tạo 3 hợp đồng mẫu ban đầu và lưu vào DB
+        if (list.isEmpty()) {
+            val now = System.currentTimeMillis().toString()
+            val defaultItems = listOf(
+                UserContractItem(1, "HĐ Dịch vụ Phần mềm - Công ty...", "Dịch vụ", "Chờ ký", cleanEmail, now),
+                UserContractItem(2, "HĐ Mua Bán Thiết Bị - CN Miền...", "Mua bán", "Hoàn tất", cleanEmail, now),
+                UserContractItem(3, "Phụ lục 02 - HĐLĐ Nguyễn Thị B", "Lao động", "Đang rà soát", cleanEmail, now)
+            )
+            val dbWrite = writableDatabase
+            defaultItems.forEach { item ->
+                val values = ContentValues().apply {
+                    put(COL_CONTRACT_TITLE, item.title)
+                    put(COL_CONTRACT_TYPE, item.type)
+                    put(COL_CONTRACT_STATUS, item.status)
+                    put(COL_CONTRACT_USER_EMAIL, cleanEmail)
+                    put(COL_CONTRACT_CREATED_AT, item.createdAt)
+                }
+                dbWrite.insert(TABLE_CONTRACTS, null, values)
+            }
+            dbWrite.close()
+            return defaultItems
+        }
+
+        return list
+    }
+
+    // Lấy danh sách mẫu hợp đồng phổ biến và số lượt sử dụng từ Database
+    fun getPopularTemplates(limit: Int = 2): List<PopularTemplateModel> {
+        val list = mutableListOf<PopularTemplateModel>()
+        val db = readableDatabase
+
+        val createTemplatesTable = """
+            CREATE TABLE IF NOT EXISTS popular_templates (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                usage_text TEXT NOT NULL,
+                category TEXT NOT NULL,
+                usage_count INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent()
+        db.execSQL(createTemplatesTable)
+
+        val query = "SELECT * FROM popular_templates ORDER BY usage_count DESC LIMIT ?"
+        val cursor = db.rawQuery(query, arrayOf(limit.toString()))
+
+        if (cursor.moveToFirst()) {
+            do {
+                val id = cursor.getString(cursor.getColumnIndexOrThrow("id"))
+                val title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
+                val usageText = cursor.getString(cursor.getColumnIndexOrThrow("usage_text"))
+                val category = cursor.getString(cursor.getColumnIndexOrThrow("category"))
+                val usageCount = cursor.getInt(cursor.getColumnIndexOrThrow("usage_count"))
+
+                list.add(PopularTemplateModel(id, title, usageText, category, usageCount))
+            } while (cursor.moveToNext())
+        }
+        cursor.close()
+        db.close()
+
+        if (list.isEmpty()) {
+            val defaultList = listOf(
+                PopularTemplateModel("1", "Thỏa thuận bảo mật (NDA)", "Dùng 45 lần tuần này", "NDA", 45),
+                PopularTemplateModel("2", "Hợp đồng Lao động (Chuẩn)", "Dùng 32 lần tuần này", "Lao động", 32)
+            )
+            savePopularTemplates(defaultList)
+            return defaultList
+        }
+
+        return list
+    }
+
+    // Lưu / Cập nhật danh sách mẫu phổ biến vào Database
+    fun savePopularTemplates(templates: List<PopularTemplateModel>): Boolean {
+        val db = writableDatabase
+        val createTemplatesTable = """
+            CREATE TABLE IF NOT EXISTS popular_templates (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                usage_text TEXT NOT NULL,
+                category TEXT NOT NULL,
+                usage_count INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent()
+        db.execSQL(createTemplatesTable)
+
+        return try {
+            templates.forEach { t ->
+                val values = ContentValues().apply {
+                    put("id", t.id)
+                    put("title", t.title)
+                    put("usage_text", t.usageText)
+                    put("category", t.category)
+                    put("usage_count", t.usageCount)
+                }
+                db.insertWithOnConflict("popular_templates", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.close()
+            true
+        } catch (_: Exception) {
+            db.close()
+            false
+        }
     }
 }
 

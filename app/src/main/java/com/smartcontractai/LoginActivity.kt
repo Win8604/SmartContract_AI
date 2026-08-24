@@ -144,6 +144,28 @@ class LoginActivity : AppCompatActivity() {
                 if (task.isSuccessful) {
                     val user = auth.currentUser
                     Toast.makeText(this, "Đăng nhập thành công: ${user?.displayName}", Toast.LENGTH_SHORT).show()
+
+                    // Lấy ID Token để đồng bộ với PostgreSQL Backend
+                    user?.getIdToken(true)?.addOnCompleteListener { tokenTask ->
+                        if (tokenTask.isSuccessful) {
+                            val idToken = tokenTask.result?.token
+                            if (idToken != null) {
+                                com.smartcontractai.network.ApiClient.syncUserWithBackend(
+                                    idToken = idToken,
+                                    fullName = user.displayName,
+                                    provider = "facebook"
+                                ) { success, responseMessage ->
+                                    runOnUiThread {
+                                        if (success) {
+                                            Toast.makeText(this, "Đã đồng bộ User vào Database!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Log.e("BackendSync", "Lỗi đồng bộ: $responseMessage")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else {
                     val exception = task.exception
                     if (exception is FirebaseAuthUserCollisionException) {

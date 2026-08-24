@@ -75,8 +75,10 @@ data class ContractTemplateModel(
     val isAiOptimized: Boolean = false,
     val usageCount: String,
     val timeAgo: String,
-    val icon: ImageVector,
-    val isPrimaryButton: Boolean = false
+    val icon: ImageVector = Icons.Outlined.EditNote,
+    val isPrimaryButton: Boolean = false,
+    val code: String = "",
+    val templateContent: String = ""
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,92 +91,53 @@ fun ContractTemplatesScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var selectedScopeTab by remember { mutableIntStateOf(0) } // 0: Công khai, 1: Doanh nghiệp, 2: Cá nhân
-    var selectedCategory by remember { mutableStateOf("Tất cả") }
+    var selectedCategoryKey by remember { mutableStateOf("all") }
     var bottomNavTab by remember { mutableIntStateOf(2) } // 2: Templates selected
 
-    val categories = listOf("Tất cả", "Lao động & Nhân sự", "NDA", "Dịch vụ & IT", "Bất động sản", "Mua bán")
-
-    val allTemplates = remember {
-        listOf(
-            ContractTemplateModel(
-                id = "1",
-                title = "Hợp Đồng Thử Việc (Bản Chuẩn 2024)",
-                description = "Mẫu hợp đồng thử việc cập nhật theo luật lao động mới nhất, phù hợp cho nhân sự văn...",
-                category = "Lao động & Nhân sự",
-                scope = "Công khai",
-                badgeText = "✨ AI Tối ưu",
-                isAiOptimized = true,
-                usageCount = "1.2k lượt dùng",
-                timeAgo = "2 ngày trước",
-                icon = Icons.Outlined.Badge,
-                isPrimaryButton = true
-            ),
-            ContractTemplateModel(
-                id = "2",
-                title = "Thỏa Thuận Bảo Mật Thông Tin (NDA) Dành Cho Đối Tác",
-                description = "Bảo vệ tài sản trí tuệ và bí mật kinh doanh khi hợp tác với bên thứ ba hoặc nhà thầu độc lập.",
-                category = "NDA",
-                scope = "Công khai",
-                badgeText = "NDA",
-                isAiOptimized = false,
-                usageCount = "850 lượt dùng",
-                timeAgo = "1 tuần trước",
-                icon = Icons.Outlined.EditNote,
-                isPrimaryButton = false
-            ),
-            ContractTemplateModel(
-                id = "3",
-                title = "Hợp Đồng Phát Triển Phần Mềm (Outsource)",
-                description = "Mẫu hợp đồng thuê ngoài phát triển ứng dụng, quy định rõ về mốc thời gian, nghiệm thu và sở...",
-                category = "Dịch vụ & IT",
-                scope = "Công khai",
-                badgeText = "IT",
-                isAiOptimized = false,
-                usageCount = "420 lượt dùng",
-                timeAgo = "1 tháng trước",
-                icon = Icons.Outlined.Laptop,
-                isPrimaryButton = false
-            ),
-            ContractTemplateModel(
-                id = "4",
-                title = "Hợp Đồng Cho Thuê Văn Phòng / Mặt Bằng",
-                description = "Điều khoản thuê mặt bằng thương mại, bảo vệ quyền lợi bên thuê và cho thuê đầy đủ pháp lý.",
-                category = "Bất động sản",
-                scope = "Doanh nghiệp",
-                badgeText = "Bất động sản",
-                isAiOptimized = false,
-                usageCount = "630 lượt dùng",
-                timeAgo = "3 ngày trước",
-                icon = Icons.Outlined.Apartment,
-                isPrimaryButton = false
-            ),
-            ContractTemplateModel(
-                id = "5",
-                title = "Hợp Đồng Mua Bán Hàng Hóa Thương Mại",
-                description = "Quy định điều khoản giao hàng, thanh toán, bảo hành và phạt vi phạm hợp đồng thương mại.",
-                category = "Mua bán",
-                scope = "Doanh nghiệp",
-                badgeText = "Thương mại",
-                isAiOptimized = false,
-                usageCount = "910 lượt dùng",
-                timeAgo = "5 ngày trước",
-                icon = Icons.Outlined.ShoppingBag,
-                isPrimaryButton = false
+    var categoriesList by remember {
+        mutableStateOf(
+            listOf(
+                com.smartcontractai.network.TemplateCategoryItem("all", "Tất cả"),
+                com.smartcontractai.network.TemplateCategoryItem("rental", "Thuê nhà"),
+                com.smartcontractai.network.TemplateCategoryItem("deposit", "Đặt cọc"),
+                com.smartcontractai.network.TemplateCategoryItem("commercial", "Mặt bằng kinh doanh"),
+                com.smartcontractai.network.TemplateCategoryItem("annex", "Phụ lục")
             )
         )
     }
 
+    var templatesList by remember { mutableStateOf<List<ContractTemplateModel>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
     var selectedTemplateId by remember { mutableStateOf<String?>(null) } // null: chưa click chọn mẫu nào
 
-    val filteredTemplates = remember(selectedScopeTab, selectedCategory) {
-        allTemplates.filter { template ->
-            val scopeMatches = when (selectedScopeTab) {
-                0 -> template.scope == "Công khai" || template.scope == "Doanh nghiệp" || template.scope == "Cá nhân"
-                1 -> template.scope == "Doanh nghiệp"
-                else -> template.scope == "Cá nhân"
+    // Tự động tải danh sách Danh mục từ PostgreSQL Backend Server
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        com.smartcontractai.network.ApiClient.fetchTemplateCategoriesFromPostgres { success, fetchedCategories ->
+            if (success && fetchedCategories.isNotEmpty()) {
+                categoriesList = fetchedCategories
             }
-            val categoryMatches = if (selectedCategory == "Tất cả") true else template.category == selectedCategory
-            scopeMatches && categoryMatches
+        }
+    }
+
+    // Tự động tải danh sách Mẫu hợp đồng từ PostgreSQL Backend Server
+    androidx.compose.runtime.LaunchedEffect(selectedCategoryKey) {
+        isLoading = true
+        val catParam = if (selectedCategoryKey == "all") null else selectedCategoryKey
+        com.smartcontractai.network.ApiClient.fetchTemplatesFromPostgres(category = catParam) { _, items ->
+            isLoading = false
+            templatesList = items.ifEmpty {
+                com.smartcontractai.network.ApiClient.getDefaultBackendTemplates(catParam)
+            }
+        }
+    }
+
+    val filteredTemplates = remember(templatesList, selectedScopeTab) {
+        templatesList.filter { template ->
+            when (selectedScopeTab) {
+                0 -> true
+                1 -> template.scope == "Doanh nghiệp" || template.category == "Mặt bằng kinh doanh"
+                else -> template.scope == "Cá nhân" || template.scope == "Công khai" || template.isAiOptimized
+            }
         }
     }
 
@@ -204,7 +167,7 @@ fun ContractTemplatesScreen(
             )
         },
         containerColor = Color(0xFFF8FAFC)
-    ) { innerPadding ->
+    ) { innerPadding: PaddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -342,18 +305,18 @@ fun ContractTemplatesScreen(
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(categories) { category ->
-                        val isSelected = selectedCategory == category
+                    items(categoriesList) { catItem ->
+                        val isSelected = selectedCategoryKey == catItem.key
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(if (isSelected) Color(0xFFDBEAFE) else Color(0xFFF1F5F9))
-                                .clickable { selectedCategory = category }
+                                .clickable { selectedCategoryKey = catItem.key }
                                 .padding(horizontal = 14.dp, vertical = 7.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = category,
+                                text = catItem.name,
                                 fontSize = 12.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFF475569)
@@ -365,20 +328,62 @@ fun ContractTemplatesScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 5. Template Cards List
-            filteredTemplates.forEach { template ->
-                val isSelected = selectedTemplateId == template.id
-                TemplateCardItem(
-                    template = template,
-                    isSelected = isSelected,
-                    onSelect = { selectedTemplateId = template.id },
-                    onUseClick = {
-                        selectedTemplateId = template.id
-                        Toast.makeText(context, "Mở hợp đồng mẫu Docs: ${template.title}", Toast.LENGTH_SHORT).show()
-                        onNavigateToDocumentEditor(template.title)
+            // 5. Template Cards List from Backend API
+            if (isLoading) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(1.dp, Color(0xFFF1F5F9))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Đang tải mẫu hợp đồng từ Backend...",
+                            fontSize = 13.sp,
+                            color = Color(0xFF64748B)
+                        )
                     }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+                }
+            } else if (filteredTemplates.isEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(1.dp, Color(0xFFF1F5F9))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Không tìm thấy mẫu hợp đồng nào phù hợp.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+                }
+            } else {
+                filteredTemplates.forEach { template ->
+                    val isSelected = selectedTemplateId == template.id
+                    TemplateCardItem(
+                        template = template,
+                        isSelected = isSelected,
+                        onSelect = { selectedTemplateId = template.id },
+                        onUseClick = {
+                            selectedTemplateId = template.id
+                            Toast.makeText(context, "Mở hợp đồng mẫu: ${template.title}", Toast.LENGTH_SHORT).show()
+                            onNavigateToDocumentEditor(template.title)
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
             }
         }
     }

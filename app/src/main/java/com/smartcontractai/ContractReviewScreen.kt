@@ -29,7 +29,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -64,6 +63,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -80,6 +80,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -98,6 +99,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.smartcontractai.data.RecentContractsRepository
 import com.smartcontractai.data.UserDatabaseHelper
 import com.smartcontractai.data.UserFileManager
 import com.smartcontractai.ui.theme.SmartContractAITheme
@@ -114,20 +116,20 @@ fun ContractReviewScreen(
     onNavigateToDashboard: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val currentEmail = remember { UserFileManager.getCurrentSessionEmail(context).trim().lowercase() }
-    val effectiveCreatorEmail = remember(creatorEmail, currentEmail) {
+    val currentEmail = remember<String> { UserFileManager.getCurrentSessionEmail(context).trim().lowercase() }
+    val effectiveCreatorEmail = remember<String>(creatorEmail, currentEmail) {
         val trimmed = creatorEmail?.trim()?.lowercase()
-        if (!trimmed.isNullOrBlank()) trimmed else currentEmail
+        if (!trimmed.isNullOrBlank()) trimmed else currentEmail.ifEmpty { "nguoidung@smartcontract.ai" }
     }
-    val isCreator = remember(currentEmail, effectiveCreatorEmail) {
-        currentEmail.isNotEmpty() && (creatorEmail.isNullOrBlank() || currentEmail == effectiveCreatorEmail)
+    val isCreator = remember<Boolean>(currentEmail, creatorEmail) {
+        creatorEmail.isNullOrBlank() || currentEmail.isEmpty() || currentEmail == creatorEmail.trim().lowercase()
     }
 
     var activeTab by remember { mutableIntStateOf(0) } // 0: Xem Review (Chỉ xem - Mặc định), 1: Tự chỉnh sửa trực tiếp, 2: Chỉnh sửa bằng AI
     var bottomNavTab by remember { mutableIntStateOf(1) } // Contracts selected
 
     // Nội dung hợp đồng đang review
-    val defaultSampleContent = remember(contractTitle, initialContent) {
+    val defaultSampleContent = remember<String>(contractTitle, initialContent) {
         initialContent.ifBlank {
             """
             CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
@@ -267,9 +269,9 @@ fun ContractReviewScreen(
                         )
                     }
                     IconButton(onClick = {
-                        val dbHelper = UserDatabaseHelper(context)
                         val sessionEmail = UserFileManager.getCurrentSessionEmail(context)
-                        dbHelper.insertContract(
+                        RecentContractsRepository.addContract(
+                            context = context,
                             title = contractTitle,
                             type = if (source == "AI") "AI Generated" else "Template",
                             status = "Đang rà soát",
@@ -292,14 +294,12 @@ fun ContractReviewScreen(
                 selectedTab = bottomNavTab,
                 onTabSelected = { index ->
                     bottomNavTab = index
-                    if (index != 2) {
-                        onNavigateToDashboard(index)
-                    }
+                    onNavigateToDashboard(index)
                 }
             )
         },
         containerColor = Color(0xFFF8FAFC)
-    ) { innerPadding ->
+    ) { innerPadding: PaddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -544,7 +544,7 @@ fun ContractReviewScreen(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            quickAiPrompts.chunked(2).forEach { rowPrompts ->
+                            quickAiPrompts.chunked(2).forEach { rowPrompts: List<String> ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -618,36 +618,46 @@ fun ContractReviewScreen(
                                                 aiLogMessage = "AI Gemini đang rà soát và cập nhật điều khoản theo yêu cầu..."
                                                 
                                                 // Mô phỏng AI cập nhật văn bản hợp đồng thực tế
-                                                val addedClause = "\n\nĐIỀU 5: ĐIỀU KHOẢN BỔ SUNG BỞI AI GEMINI COPILOT\n5.1. Hai bên cam kết thực hiện đúng yêu cầu: $aiPromptText.\n5.2. Các trường hợp bất khả kháng theo quy định pháp luật sẽ được miễn trừ trách nhiệm bồi thường sau khi thông báo bằng văn bản trong vòng 48h."
-                                                contractText += addedClause
+                                                contractText += "\n\nĐIỀU 5: ĐIỀU KHOẢN BỔ SUNG BỞI AI GEMINI COPILOT\n5.1. Hai bên cam kết thực hiện đúng yêu cầu: $aiPromptText.\n5.2. Các trường hợp bất khả kháng theo quy định pháp luật sẽ được miễn trừ trách nhiệm bồi thường sau khi thông báo bằng văn bản trong vòng 48h."
 
                                                 Toast.makeText(context, "Đã cập nhật hợp đồng bằng AI!", Toast.LENGTH_SHORT).show()
                                                 isAiProcessing = false
                                                 aiPromptText = ""
                                             }
                                         },
+                                        enabled = !isAiProcessing,
                                         shape = RoundedCornerShape(8.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                                contentDescription = "Gửi",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Sửa bằng AI", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            if (isAiProcessing) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(14.dp),
+                                                    color = Color.White,
+                                                    strokeWidth = 2.dp
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Đang xử lý...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                                    contentDescription = "Gửi",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Sửa bằng AI", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                     }
 
                                     // Nút "Lưu" Hợp đồng vừa sửa bằng AI
                                     Button(
                                         onClick = {
-                                            val dbHelper = UserDatabaseHelper(context)
                                             val sessionEmail = UserFileManager.getCurrentSessionEmail(context)
-                                            dbHelper.insertContract(
+                                            RecentContractsRepository.addContract(
+                                                context = context,
                                                 title = contractTitle,
                                                 type = "AI Generated",
                                                 status = "Đã chỉnh sửa bởi AI",
@@ -845,9 +855,9 @@ fun ContractReviewScreen(
                             // Nút "Lưu" hợp đồng đã chỉnh sửa trực tiếp trên thanh công cụ
                             Button(
                                 onClick = {
-                                    val dbHelper = UserDatabaseHelper(context)
                                     val sessionEmail = UserFileManager.getCurrentSessionEmail(context)
-                                    dbHelper.insertContract(
+                                    RecentContractsRepository.addContract(
+                                        context = context,
                                         title = contractTitle,
                                         type = if (source == "AI") "AI Generated" else "Template",
                                         status = "Đã tự chỉnh sửa",
@@ -988,9 +998,9 @@ fun ContractReviewScreen(
                             ) {
                                 Button(
                                     onClick = {
-                                        val dbHelper = UserDatabaseHelper(context)
                                         val sessionEmail = UserFileManager.getCurrentSessionEmail(context)
-                                        dbHelper.insertContract(
+                                        RecentContractsRepository.addContract(
+                                            context = context,
                                             title = contractTitle,
                                             type = if (activeTab == 2) "AI Generated" else (if (source == "AI") "AI Generated" else "Template"),
                                             status = if (activeTab == 2) "Đã chỉnh sửa bởi AI" else "Đã tự chỉnh sửa",
@@ -1077,6 +1087,8 @@ fun ContractReviewScreen(
                 OutlinedButton(
                     onClick = {
                         contractText = defaultSampleContent
+                        isSigned = false
+                        aiLogMessage = null
                         Toast.makeText(context, "Đã khôi phục hợp đồng ban đầu", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.weight(0.9f),
@@ -1089,9 +1101,9 @@ fun ContractReviewScreen(
 
                 Button(
                     onClick = {
-                        val dbHelper = UserDatabaseHelper(context)
                         val sessionEmail = UserFileManager.getCurrentSessionEmail(context)
-                        dbHelper.insertContract(
+                        RecentContractsRepository.addContract(
+                            context = context,
                             title = contractTitle,
                             type = if (source == "AI") "AI Generated" else "Template",
                             status = if (isSigned) "Đã ký xác nhận" else "Đã hoàn tất",
@@ -1202,6 +1214,7 @@ fun ContractReviewScreen(
                                                 drawPointsCount++
                                             },
                                             onDrag = { change, _ ->
+                                                change.consume()
                                                 currentPath?.lineTo(change.position.x, change.position.y)
                                                 drawPointsCount++
                                             },
@@ -1299,17 +1312,21 @@ fun ContractReviewScreen(
                     // Nút Chính "Hoàn tất & Gửi hợp đồng"
                     Button(
                         onClick = {
-                            isSigned = true
-                            val dbHelper = UserDatabaseHelper(context)
-                            val sessionEmail = UserFileManager.getCurrentSessionEmail(context)
-                            dbHelper.insertContract(
-                                title = contractTitle,
-                                type = if (source == "AI") "AI Generated" else "Template",
-                                status = "Đã ký xác nhận",
-                                userEmail = sessionEmail
-                            )
-                            Toast.makeText(context, "Đã ký xác nhận hợp đồng thành công!", Toast.LENGTH_LONG).show()
-                            showSignatureDialog = false
+                            if (signaturePaths.isEmpty() && currentPath == null && drawPointsCount == 0) {
+                                Toast.makeText(context, "Vui lòng ký tên vào khung trước khi xác nhận!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                isSigned = true
+                                val sessionEmail = UserFileManager.getCurrentSessionEmail(context)
+                                RecentContractsRepository.addContract(
+                                    context = context,
+                                    title = contractTitle,
+                                    type = if (source == "AI") "AI Generated" else "Template",
+                                    status = "Đã ký xác nhận",
+                                    userEmail = sessionEmail
+                                )
+                                Toast.makeText(context, "Đã ký xác nhận hợp đồng thành công!", Toast.LENGTH_LONG).show()
+                                showSignatureDialog = false
+                            }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1340,9 +1357,9 @@ fun ContractReviewScreen(
 
     // DIALOG TẠO MÃ QR CHỮ KÝ SỐ CERTIFICATE (MÔ PHỎNG CHUẨN THEO HÌNH 2)
     if (showGenerateQrDialog && isCreator) {
-        val contractRefId = remember(contractTitle) { "NDA-2024-X1" }
+        val contractRefId = remember<String>(contractTitle) { "NDA-2024-X1" }
         val qrData = "SMARTCONTRACT_AI|TITLE:$contractTitle|CREATOR:$effectiveCreatorEmail|REF:$contractRefId"
-        val encodedQrUrl = remember(qrData) {
+        val encodedQrUrl = remember<String>(qrData) {
             "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${java.net.URLEncoder.encode(qrData, "UTF-8")}"
         }
 

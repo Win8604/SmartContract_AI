@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -89,7 +90,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
+import com.smartcontractai.data.ContractStatsRepository
 import com.smartcontractai.data.NotificationRepository
+import com.smartcontractai.data.PopularTemplateModel
+import com.smartcontractai.data.PopularTemplatesRepository
+import com.smartcontractai.data.RecentContractsRepository
 import com.smartcontractai.data.UserDatabaseHelper
 import com.smartcontractai.data.UserFileManager
 import com.smartcontractai.ui.theme.SmartContractAITheme
@@ -154,7 +159,7 @@ fun DashboardScreen(
                 }
             }
         }
-    ) { innerPadding ->
+    ) { innerPadding: PaddingValues ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -246,8 +251,8 @@ fun DashboardScreen(
 
                         Spacer(modifier = Modifier.height(24.dp))
 
-                        // 5. Hợp đồng gần đây (3 recent items với colored left strips)
-                        DashboardRecentContracts()
+                        // 5. Hợp đồng gần đây (Cập nhật trực tiếp từ PostgreSQL Database theo từng người dùng)
+                        DashboardRecentContracts(userEmail = userEmail)
 
                         Spacer(modifier = Modifier.height(24.dp))
 
@@ -316,9 +321,14 @@ fun DashboardHeader(
         }
     }
 
-    // Real-time Notification Feed tích hợp Database & Firebase FCM
+    // Real-time Notification Feed tích hợp Database, PostgreSQL & Firebase FCM
     val notifications by NotificationRepository.notifications.collectAsState()
     val unreadCount = notifications.count { it.isUnread }
+
+    LaunchedEffect(userEmail) {
+        NotificationRepository.loadFromDatabase(context, userEmail)
+        NotificationRepository.refresh(context, userEmail)
+    }
 
     Row(
         modifier = Modifier
@@ -661,10 +671,7 @@ fun DashboardGreetingBanner(
 @Composable
 fun DashboardOverviewGrid(userEmail: String? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val dbHelper = remember(context) { UserDatabaseHelper(context) }
-    var stats by remember(userEmail) {
-        mutableStateOf(dbHelper.getUserContractStats(userEmail))
-    }
+    val liveStats by ContractStatsRepository.contractStats.collectAsState()
 
     val userInfo = remember(userEmail) {
         if (!userEmail.isNullOrEmpty()) UserFileManager.getUserByEmail(context, userEmail) else null
@@ -672,8 +679,11 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
     val isCorporateUser = userInfo?.isCorporate == true || userInfo?.accountType == "CORPORATE" || userInfo?.authType?.startsWith("CORPORATE") == true
 
     LaunchedEffect(userEmail) {
-        stats = dbHelper.getUserContractStats(userEmail)
+        ContractStatsRepository.loadFromDatabase(context, userEmail)
+        ContractStatsRepository.refresh(context, userEmail)
     }
+
+    val stats = liveStats
 
     Column(
         modifier = Modifier
@@ -700,7 +710,7 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
                 count = stats.myContractsCount.toString(),
                 label = "Hợp đồng của tôi",
                 countColor = Color(0xFF1D4ED8),
-                isHighlighted = false
+                showRedDot = false
             )
             OverviewMetricCard(
                 modifier = Modifier.weight(1f),
@@ -708,13 +718,13 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
                 count = stats.pendingApprovalCount.toString(),
                 label = if (isCorporateUser) "Chờ duyệt nội bộ" else "Đang rà soát",
                 countColor = Color(0xFF0F172A),
-                isHighlighted = false
+                showRedDot = stats.pendingApprovalCount > 0
             )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Row 2: Chờ ký (Highlighted with red badge dot) & Đã hoàn tất
+        // Row 2: Chờ ký & Đã hoàn tất
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -725,7 +735,7 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
                 count = stats.pendingSignatureCount.toString(),
                 label = "Chờ ký",
                 countColor = Color(0xFF1D4ED8),
-                isHighlighted = true
+                showRedDot = stats.pendingSignatureCount > 0
             )
             OverviewMetricCard(
                 modifier = Modifier.weight(1f),
@@ -733,7 +743,7 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
                 count = stats.completedCount.toString(),
                 label = "Đã hoàn tất",
                 countColor = Color(0xFF0F172A),
-                isHighlighted = false
+                showRedDot = false
             )
         }
     }
@@ -746,55 +756,65 @@ fun OverviewMetricCard(
     count: String,
     label: String,
     countColor: Color,
-    isHighlighted: Boolean
+    showRedDot: Boolean = false
 ) {
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isHighlighted) Color(0xFFE0EDFF) else Color.White
+            containerColor = Color.White
         ),
-        border = BorderStroke(1.dp, if (isHighlighted) Color(0xFF3B82F6) else Color(0xFFF1F5F9))
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
     ) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            if (isHighlighted) {
-                // Red indicator dot top right
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFEF4444))
-                        .align(Alignment.TopEnd)
-                )
-            }
-
-            Column {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.Top
+            ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = label,
                     tint = Color(0xFF334155),
                     modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = count,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = countColor
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = label,
-                    fontSize = 11.sp,
-                    color = Color(0xFF64748B)
-                )
+                if (showRedDot) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFEF4444))
+                    )
+                }
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = count,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = countColor
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                color = Color(0xFF64748B)
+            )
         }
     }
 }
 
 @Composable
-fun DashboardRecentContracts() {
+fun DashboardRecentContracts(userEmail: String? = null) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val recentContracts by RecentContractsRepository.recentContracts.collectAsState()
+
+    LaunchedEffect(userEmail) {
+        RecentContractsRepository.loadFromDatabase(context, userEmail)
+        RecentContractsRepository.refresh(context, userEmail)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -822,39 +842,94 @@ fun DashboardRecentContracts() {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Contract Item 1: HĐ Dịch vụ Phần mềm (Red left strip)
-        RecentContractCard(
-            stripColor = Color(0xFFEF4444),
-            badgeBg = Color(0xFFFFE4E6),
-            iconTint = Color(0xFFE11D48),
-            icon = Icons.Outlined.Edit,
-            title = "HĐ Dịch vụ Phần mềm - Công ty...",
-            subtitle = "Cập nhật 2 giờ trước"
-        )
+        if (recentContracts.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, Color(0xFFF1F5F9))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Chưa có hợp đồng nào. Tạo hợp đồng mới để bắt đầu!",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            recentContracts.take(5).forEachIndexed { index, item ->
+                if (index > 0) Spacer(modifier = Modifier.height(10.dp))
 
-        Spacer(modifier = Modifier.height(10.dp))
+                val stripColor: Color
+                val badgeBg: Color
+                val iconTint: Color
+                val icon: ImageVector
 
-        // Contract Item 2: HĐ Mua Bán Thiết Bị (Green left strip)
-        RecentContractCard(
-            stripColor = Color(0xFF10B981),
-            badgeBg = Color(0xFFD1FAE5),
-            iconTint = Color(0xFF059669),
-            icon = Icons.Outlined.CheckCircleOutline,
-            title = "HĐ Mua Bán Thiết Bị - CN Miền...",
-            subtitle = "Hoàn tất hôm qua"
-        )
+                when {
+                    item.status.contains("hoàn tất", ignoreCase = true) || item.status.contains("đã ký", ignoreCase = true) || item.status.contains("completed", ignoreCase = true) -> {
+                        stripColor = Color(0xFF10B981)
+                        badgeBg = Color(0xFFD1FAE5)
+                        iconTint = Color(0xFF059669)
+                        icon = Icons.Outlined.CheckCircleOutline
+                    }
+                    item.status.contains("chờ ký", ignoreCase = true) || item.status.contains("ký", ignoreCase = true) || item.status.contains("signature", ignoreCase = true) -> {
+                        stripColor = Color(0xFFEF4444)
+                        badgeBg = Color(0xFFFFE4E6)
+                        iconTint = Color(0xFFE11D48)
+                        icon = Icons.Outlined.Edit
+                    }
+                    else -> {
+                        stripColor = Color(0xFF1D4ED8)
+                        badgeBg = Color(0xFFE0EDFF)
+                        iconTint = Color(0xFF1D4ED8)
+                        icon = Icons.AutoMirrored.Outlined.ReceiptLong
+                    }
+                }
 
-        Spacer(modifier = Modifier.height(10.dp))
+                val formattedSubtitle = remember(item.createdAt) {
+                    val raw = item.createdAt
+                    if (raw.contains("trước") || raw.contains("qua") || raw.contains("hôm nay")) {
+                        raw
+                    } else {
+                        try {
+                            val timeMs = raw.toLongOrNull()
+                            if (timeMs != null && timeMs > 0) {
+                                val diffMs = System.currentTimeMillis() - timeMs
+                                val mins = diffMs / (1000 * 60)
+                                val hours = mins / 60
+                                val days = hours / 24
 
-        // Contract Item 3: Phụ lục 02 - HĐLĐ Nguyễn Thị B (Gray left strip)
-        RecentContractCard(
-            stripColor = Color(0xFF64748B),
-            badgeBg = Color(0xFFE0EDFF),
-            iconTint = Color(0xFF1D4ED8),
-            icon = Icons.AutoMirrored.Outlined.ReceiptLong,
-            title = "Phụ lục 02 - HĐLĐ Nguyễn Thị B",
-            subtitle = "Cập nhật 2 ngày trước"
-        )
+                                when {
+                                    mins < 5 -> "Vừa xong"
+                                    mins < 60 -> "Cập nhật $mins phút trước"
+                                    hours < 24 -> "Cập nhật $hours giờ trước"
+                                    days == 1L -> "Cập nhật hôm qua"
+                                    else -> "Cập nhật $days ngày trước"
+                                }
+                            } else "Cập nhật gần đây"
+                        } catch (_: Exception) {
+                            "Cập nhật gần đây"
+                        }
+                    }
+                }
+
+                RecentContractCard(
+                    stripColor = stripColor,
+                    badgeBg = badgeBg,
+                    iconTint = iconTint,
+                    icon = icon,
+                    title = item.title,
+                    subtitle = formattedSubtitle
+                )
+            }
+        }
     }
 }
 
@@ -940,6 +1015,21 @@ fun RecentContractCard(
 
 @Composable
 fun DashboardPopularTemplatesSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val popularTemplates by PopularTemplatesRepository.popularTemplates.collectAsState()
+
+    LaunchedEffect(Unit) {
+        PopularTemplatesRepository.loadFromDatabase(context)
+        PopularTemplatesRepository.refresh(context)
+    }
+
+    val displayTemplates = popularTemplates.ifEmpty {
+        listOf(
+            PopularTemplateModel("1", "Thỏa thuận bảo mật (NDA)", "Dùng 45 lần tuần này", "NDA", 45),
+            PopularTemplateModel("2", "Hợp đồng Lao động (Chuẩn)", "Dùng 32 lần tuần này", "Lao động", 32)
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -958,18 +1048,20 @@ fun DashboardPopularTemplatesSection() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            PopularTemplateGridCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.Diamond,
-                title = "Thỏa thuận bảo mật (NDA)",
-                usageText = "Dùng 45 lần tuần này"
-            )
-            PopularTemplateGridCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.WorkOutline,
-                title = "Hợp đồng Lao động (Chuẩn)",
-                usageText = "Dùng 32 lần tuần này"
-            )
+            displayTemplates.take(2).forEach { template ->
+                val icon = if (template.category.contains("NDA", ignoreCase = true) || template.title.contains("NDA", ignoreCase = true)) {
+                    Icons.Default.Diamond
+                } else {
+                    Icons.Outlined.WorkOutline
+                }
+
+                PopularTemplateGridCard(
+                    modifier = Modifier.weight(1f),
+                    icon = icon,
+                    title = template.title,
+                    usageText = template.usageText
+                )
+            }
         }
     }
 }

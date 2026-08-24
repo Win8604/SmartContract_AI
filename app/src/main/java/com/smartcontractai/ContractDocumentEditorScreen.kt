@@ -214,7 +214,7 @@ fun ContractDocumentEditorScreen(
             )
         },
         containerColor = Color(0xFFF1F5F9)
-    ) { innerPadding ->
+    ) { innerPadding: PaddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()

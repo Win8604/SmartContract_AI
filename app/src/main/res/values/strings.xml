@@ -7,4 +7,5 @@
     <string name="fb_login_protocol_scheme">fb2180084312555401</string>
     <string name="msg_token_fmt">FCM Token: %1$s</string>
     <string name="default_notification_channel_id">fcm_default_channel</string>
+    <string name="gemini_api_key">YOUR_GEMINI_API_KEY</string>
 </resources>
