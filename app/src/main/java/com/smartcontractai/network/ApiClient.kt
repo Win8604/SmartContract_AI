@@ -545,5 +545,205 @@ object ApiClient {
             }
         })
     }
+
+    /**
+     * Đăng ký tài khoản người dùng trực tiếp vào Database schema.sql bên Backend PostgreSQL Server
+     */
+    fun registerUserOnBackend(
+        fullName: String,
+        email: String,
+        password: String,
+        phoneNumber: String?,
+        accountType: String = "personal",
+        onResult: (Boolean, String?) -> Unit
+    ) {
+        val json = JSONObject().apply {
+            put("fullName", fullName)
+            put("email", email.trim().lowercase())
+            put("password", password)
+            if (!phoneNumber.isNullOrBlank()) {
+                put("phoneNumber", phoneNumber)
+            }
+            val accType = if (accountType.lowercase() == "corporate" || accountType.lowercase() == "business") "business" else "personal"
+            put("accountType", accType)
+            put("role", "landlord")
+        }
+
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val requestBody = json.toString().toRequestBody(mediaType)
+        val request = Request.Builder()
+            .url("$BASE_URL/auth/register")
+            .post(requestBody)
+            .build()
+
+        client.newCall(request).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                onResult(false, "Không thể kết nối đến máy chủ Backend (Lỗi mạng)")
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                val bodyStr = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    try {
+                        val jsonObj = JSONObject(bodyStr)
+                        val message = jsonObj.optString("message", "Đăng ký tài khoản thành công")
+                        onResult(true, message)
+                    } catch (_: Exception) {
+                        onResult(true, "Đăng ký tài khoản thành công")
+                    }
+                } else {
+                    val errMsg = try {
+                        val jsonObj = JSONObject(bodyStr)
+                        jsonObj.optString("message", "Đăng ký tài khoản thất bại")
+                    } catch (_: Exception) {
+                        "Đăng ký tài khoản thất bại (HTTP ${response.code})"
+                    }
+                    onResult(false, errMsg)
+                }
+            }
+        })
+    }
+
+    /**
+     * Đăng nhập và kiểm tra thông tin người dùng từ Database schema.sql bên Backend PostgreSQL Server
+     */
+    fun loginUserOnBackend(
+        email: String,
+        password: String,
+        onResult: (Boolean, String?, JSONObject?) -> Unit
+    ) {
+        val json = JSONObject().apply {
+            put("email", email.trim().lowercase())
+            put("password", password)
+        }
+
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val requestBody = json.toString().toRequestBody(mediaType)
+        val request = Request.Builder()
+            .url("$BASE_URL/auth/login")
+            .post(requestBody)
+            .build()
+
+        client.newCall(request).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                onResult(false, "Mất kết nối máy chủ Backend", null)
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                val bodyStr = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    try {
+                        val jsonObj = JSONObject(bodyStr)
+                        val dataObj = jsonObj.optJSONObject("data")
+                        val message = jsonObj.optString("message", "Đăng nhập thành công")
+                        onResult(true, message, dataObj)
+                    } catch (_: Exception) {
+                        onResult(true, "Đăng nhập thành công", null)
+                    }
+                } else {
+                    val errMsg = try {
+                        val jsonObj = JSONObject(bodyStr)
+                        jsonObj.optString("message", "Email hoặc mật khẩu không chính xác")
+                    } catch (_: Exception) {
+                        "Đăng nhập thất bại (HTTP ${response.code})"
+                    }
+                    onResult(false, errMsg, null)
+                }
+            }
+        })
+    }
+
+    /**
+     * Phê duyệt hợp đồng trên PostgreSQL Backend Server
+     */
+    fun approveContractOnPostgres(contractId: String, onResult: (Boolean, String?) -> Unit) {
+        val request = Request.Builder()
+            .url("$BASE_URL/contracts/$contractId/approve")
+            .post(JSONObject().toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        client.newCall(request).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                onResult(false, e.message)
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                onResult(response.isSuccessful, response.body?.string())
+            }
+        })
+    }
+
+    /**
+     * Từ chối hợp đồng trên PostgreSQL Backend Server
+     */
+    fun rejectContractOnPostgres(contractId: String, reason: String? = null, onResult: (Boolean, String?) -> Unit) {
+        val json = JSONObject().apply { put("reason", reason ?: "Không đạt yêu cầu") }
+        val request = Request.Builder()
+            .url("$BASE_URL/contracts/$contractId/reject")
+            .post(json.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        client.newCall(request).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                onResult(false, e.message)
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                onResult(response.isSuccessful, response.body?.string())
+            }
+        })
+    }
+
+    /**
+     * Lấy nhật ký hoạt động Audit Logs từ PostgreSQL Backend Server
+     */
+    fun fetchAuditLogsFromPostgres(onResult: (Boolean, List<AuditLogApiItem>) -> Unit) {
+        val request = Request.Builder()
+            .url("$BASE_URL/contracts/audit-logs")
+            .get()
+            .build()
+
+        client.newCall(request).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                onResult(false, emptyList())
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                if (response.isSuccessful) {
+                    val bodyStr = response.body?.string() ?: ""
+                    try {
+                        val jsonObj = JSONObject(bodyStr)
+                        val dataArray = jsonObj.optJSONArray("data")
+                        val list = mutableListOf<AuditLogApiItem>()
+                        if (dataArray != null) {
+                            for (i in 0 until dataArray.length()) {
+                                val item = dataArray.getJSONObject(i)
+                                list.add(
+                                    AuditLogApiItem(
+                                        id = item.optString("id", i.toString()),
+                                        text = item.optString("text"),
+                                        time = item.optString("time"),
+                                        colorHex = item.optString("color", "#2563EB")
+                                    )
+                                )
+                            }
+                        }
+                        onResult(true, list)
+                    } catch (_: Exception) {
+                        onResult(false, emptyList())
+                    }
+                } else {
+                    onResult(false, emptyList())
+                }
+            }
+        })
+    }
 }
+
+data class AuditLogApiItem(
+    val id: String,
+    val text: String,
+    val time: String,
+    val colorHex: String
+)
 

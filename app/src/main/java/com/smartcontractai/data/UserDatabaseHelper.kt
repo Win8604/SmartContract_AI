@@ -500,6 +500,25 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         return result != -1L
     }
 
+    // Cập nhật trạng thái hợp đồng trong Database
+    fun updateContractStatus(contractId: Int, newStatus: String, userEmail: String? = null): Boolean {
+        val cleanEmail = userEmail?.trim()?.lowercase()?.ifBlank { null } ?: "guest@smartcontract.ai"
+        val db = writableDatabase
+
+        val values = ContentValues().apply {
+            put(COL_CONTRACT_STATUS, newStatus)
+        }
+
+        val rows = db.update(TABLE_CONTRACTS, values, "$COL_CONTRACT_ID = ?", arrayOf(contractId.toString()))
+        db.close()
+
+        if (rows > 0) {
+            val stats = getUserContractStats(cleanEmail)
+            saveUserContractStats(cleanEmail, stats)
+        }
+        return rows > 0
+    }
+
     // Lấy danh sách hợp đồng gần đây của người dùng từ Database
     fun getRecentContracts(userEmail: String?, limit: Int = 5): List<UserContractItem> {
         val cleanEmail = userEmail?.trim()?.lowercase()?.ifBlank { null } ?: "guest@smartcontract.ai"
@@ -535,29 +554,6 @@ class UserDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         }
         cursor.close()
         db.close()
-
-        // Nếu chưa có hợp đồng nào trong DB, khởi tạo 3 hợp đồng mẫu ban đầu và lưu vào DB
-        if (list.isEmpty()) {
-            val now = System.currentTimeMillis().toString()
-            val defaultItems = listOf(
-                UserContractItem(1, "HĐ Dịch vụ Phần mềm - Công ty...", "Dịch vụ", "Chờ ký", cleanEmail, now),
-                UserContractItem(2, "HĐ Mua Bán Thiết Bị - CN Miền...", "Mua bán", "Hoàn tất", cleanEmail, now),
-                UserContractItem(3, "Phụ lục 02 - HĐLĐ Nguyễn Thị B", "Lao động", "Đang rà soát", cleanEmail, now)
-            )
-            val dbWrite = writableDatabase
-            defaultItems.forEach { item ->
-                val values = ContentValues().apply {
-                    put(COL_CONTRACT_TITLE, item.title)
-                    put(COL_CONTRACT_TYPE, item.type)
-                    put(COL_CONTRACT_STATUS, item.status)
-                    put(COL_CONTRACT_USER_EMAIL, cleanEmail)
-                    put(COL_CONTRACT_CREATED_AT, item.createdAt)
-                }
-                dbWrite.insert(TABLE_CONTRACTS, null, values)
-            }
-            dbWrite.close()
-            return defaultItems
-        }
 
         return list
     }

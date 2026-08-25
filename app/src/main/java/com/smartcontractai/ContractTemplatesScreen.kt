@@ -342,8 +342,9 @@ fun ContractTemplatesScreen(
                             .padding(24.dp),
                         contentAlignment = Alignment.Center
                     ) {
+                        // Đang tải mẫu hợp đồng từ Backend
                         Text(
-                            text = "Đang tải mẫu hợp đồng từ Backend...",
+                            text = "Đang tải mẫu hợp đồng...",
                             fontSize = 13.sp,
                             color = Color(0xFF64748B)
                         )

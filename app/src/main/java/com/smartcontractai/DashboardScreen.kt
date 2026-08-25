@@ -247,12 +247,19 @@ fun DashboardScreen(
                         val userEmail = currentSessionEmail.ifBlank { currentUser?.email }
 
                         // 3. Tổng quan (4 metric cards cập nhật dữ liệu từ Database theo từng người dùng)
-                        DashboardOverviewGrid(userEmail = userEmail)
+                        DashboardOverviewGrid(
+                            userEmail = userEmail,
+                            onSeeAllClick = { selectedTab = 1 }
+                        )
 
                         Spacer(modifier = Modifier.height(24.dp))
 
                         // 5. Hợp đồng gần đây (Cập nhật trực tiếp từ PostgreSQL Database theo từng người dùng)
-                        DashboardRecentContracts(userEmail = userEmail)
+                        DashboardRecentContracts(
+                            userEmail = userEmail,
+                            onSeeAllClick = { selectedTab = 1 },
+                            onContractClick = { selectedTab = 1 }
+                        )
 
                         Spacer(modifier = Modifier.height(24.dp))
 
@@ -669,7 +676,10 @@ fun DashboardGreetingBanner(
 }
 
 @Composable
-fun DashboardOverviewGrid(userEmail: String? = null) {
+fun DashboardOverviewGrid(
+    userEmail: String? = null,
+    onSeeAllClick: () -> Unit = {}
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val liveStats by ContractStatsRepository.contractStats.collectAsState()
 
@@ -710,7 +720,8 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
                 count = stats.myContractsCount.toString(),
                 label = "Hợp đồng của tôi",
                 countColor = Color(0xFF1D4ED8),
-                showRedDot = false
+                showRedDot = false,
+                onClick = onSeeAllClick
             )
             OverviewMetricCard(
                 modifier = Modifier.weight(1f),
@@ -718,7 +729,8 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
                 count = stats.pendingApprovalCount.toString(),
                 label = if (isCorporateUser) "Chờ duyệt nội bộ" else "Đang rà soát",
                 countColor = Color(0xFF0F172A),
-                showRedDot = stats.pendingApprovalCount > 0
+                showRedDot = stats.pendingApprovalCount > 0,
+                onClick = onSeeAllClick
             )
         }
 
@@ -735,7 +747,8 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
                 count = stats.pendingSignatureCount.toString(),
                 label = "Chờ ký",
                 countColor = Color(0xFF1D4ED8),
-                showRedDot = stats.pendingSignatureCount > 0
+                showRedDot = stats.pendingSignatureCount > 0,
+                onClick = onSeeAllClick
             )
             OverviewMetricCard(
                 modifier = Modifier.weight(1f),
@@ -743,7 +756,8 @@ fun DashboardOverviewGrid(userEmail: String? = null) {
                 count = stats.completedCount.toString(),
                 label = "Đã hoàn tất",
                 countColor = Color(0xFF0F172A),
-                showRedDot = false
+                showRedDot = false,
+                onClick = onSeeAllClick
             )
         }
     }
@@ -756,10 +770,11 @@ fun OverviewMetricCard(
     count: String,
     label: String,
     countColor: Color,
-    showRedDot: Boolean = false
+    showRedDot: Boolean = false,
+    onClick: () -> Unit = {}
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color.White
@@ -806,7 +821,11 @@ fun OverviewMetricCard(
 }
 
 @Composable
-fun DashboardRecentContracts(userEmail: String? = null) {
+fun DashboardRecentContracts(
+    userEmail: String? = null,
+    onSeeAllClick: () -> Unit = {},
+    onContractClick: () -> Unit = {}
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val recentContracts by RecentContractsRepository.recentContracts.collectAsState()
 
@@ -836,7 +855,7 @@ fun DashboardRecentContracts(userEmail: String? = null) {
                 fontSize = 11.sp,
                 color = Color(0xFF1D4ED8),
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { }
+                modifier = Modifier.clickable { onSeeAllClick() }
             )
         }
 
@@ -926,7 +945,8 @@ fun DashboardRecentContracts(userEmail: String? = null) {
                     iconTint = iconTint,
                     icon = icon,
                     title = item.title,
-                    subtitle = formattedSubtitle
+                    subtitle = formattedSubtitle,
+                    onClick = onContractClick
                 )
             }
         }
@@ -940,12 +960,13 @@ fun RecentContractCard(
     iconTint: Color,
     icon: ImageVector,
     title: String,
-    subtitle: String
+    subtitle: String,
+    onClick: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { },
+            .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(1.dp, Color(0xFFF1F5F9))

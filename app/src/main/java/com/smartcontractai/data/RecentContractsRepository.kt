@@ -45,4 +45,28 @@ object RecentContractsRepository {
         loadFromDatabase(context, email)
         ContractStatsRepository.refresh(context, email)
     }
+
+    // Cập nhật trạng thái hợp đồng (Phê duyệt / Từ chối), đồng bộ Database, PostgreSQL Server & UI Realtime
+    fun updateContractStatus(context: Context, contractId: Int, newStatus: String, userEmail: String? = null) {
+        val email = if (!userEmail.isNullOrBlank()) userEmail else UserFileManager.getCurrentSessionEmail(context)
+        val dbHelper = UserDatabaseHelper(context.applicationContext)
+        dbHelper.updateContractStatus(contractId, newStatus, email)
+
+        // Cập nhật danh sách trong bộ nhớ real-time để giao diện ẩn ngay lập tức
+        _recentContracts.value = _recentContracts.value.map { item ->
+            if (item.id == contractId) item.copy(status = newStatus) else item
+        }
+
+        // Đồng bộ lên PostgreSQL Backend Server
+        if (newStatus.contains("hoàn tất", ignoreCase = true) || newStatus.contains("đã ký", ignoreCase = true) || newStatus.contains("approve", ignoreCase = true)) {
+            ApiClient.approveContractOnPostgres(contractId.toString()) { _, _ -> }
+        } else {
+            ApiClient.rejectContractOnPostgres(contractId.toString()) { _, _ -> }
+        }
+
+        // Tải lại dữ liệu từ Database & Thống kê số lượng hợp đồng
+        loadFromDatabase(context, email)
+        ContractStatsRepository.loadFromDatabase(context, email)
+        ContractStatsRepository.refresh(context, email)
+    }
 }
