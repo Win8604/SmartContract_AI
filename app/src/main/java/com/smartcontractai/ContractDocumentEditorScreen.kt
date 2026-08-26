@@ -3,68 +3,51 @@
 package com.smartcontractai
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.outlined.SmartButton
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.smartcontractai.ui.theme.SmartContractAITheme
+import com.smartcontractai.utils.TemplateVariableParser
 
-// ==================== MÀN HÌNH CHỈNH SỬA VĂN BẢN MẪU WORD / DOCS ====================
+data class ChatMessage(
+    val sender: String, // "AI" hoặc "User"
+    val text: String
+)
+
+// ==================== MÀN HÌNH CHỈNH SỬA VĂN BẢN MẪU WORD / DOCS (CÓ SPLIT-SCREEN CHATBOT & CONTEXTUAL REWRITE) ====================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContractDocumentEditorScreen(
@@ -73,8 +56,23 @@ fun ContractDocumentEditorScreen(
     onNavigateToDashboard: (Int) -> Unit = {},
     onNavigateToReview: (String, String) -> Unit = { _, _ -> }
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     var bottomNavTab by remember { mutableIntStateOf(1) } // Contracts selected
+
+    // State chế độ Split-Screen Interactive Chatbot
+    var isSplitScreenChatbotOpen by remember { mutableStateOf(false) }
+    var aiChatInput by remember { mutableStateOf("") }
+    var chatMessages by remember {
+        mutableStateOf(
+            listOf(
+                ChatMessage("AI", "Xin chào! Tôi là Trợ lý AI Copilot Split-Screen. Bạn có thể yêu cầu điều chỉnh bất kỳ điều khoản nào (ví dụ: *'Thêm điều khoản phạt chậm thanh toán 0.05%/ngày'*).")
+            )
+        )
+    }
+
+    // State Bôi đen văn bản yêu cầu AI viết lại (Contextual Selection AI Rewrite)
+    var isContextualRewriteVisible by remember { mutableStateOf(false) }
+    var selectedClauseText by remember { mutableStateOf("ĐIỀU 2: MỨC LƯƠNG VÀ CHẾ ĐỘ THƯỞNG\n2.1. Mức lương thử việc: 15,000,000 VNĐ/tháng.") }
 
     // Form điền biến mẫu hợp đồng (Fillable Fields)
     var partyBName by remember { mutableStateOf("Nguyễn Văn A") }
@@ -137,6 +135,12 @@ fun ContractDocumentEditorScreen(
         )
     }
 
+    // Tự động trích xuất các biến {{Var}} bằng TemplateVariableParser
+    val dynamicVariables = remember(contractContent) {
+        TemplateVariableParser.extractVariables(contractContent)
+    }
+    var variableValuesMap by remember { mutableStateOf(mutableMapOf<String, String>()) }
+
     var isEditingFormOpen by remember { mutableStateOf(true) }
 
     Scaffold(
@@ -162,7 +166,7 @@ fun ContractDocumentEditorScreen(
                             )
                         }
                         Text(
-                            text = "Định dạng Docs / Word - Người dùng tự điền",
+                            text = if (isSplitScreenChatbotOpen) "Bật Chế độ Split-Screen Chatbot AI" else "Định dạng Docs / Word - AI Trợ lý",
                             fontSize = 11.sp,
                             color = Color(0xFF64748B)
                         )
@@ -178,6 +182,21 @@ fun ContractDocumentEditorScreen(
                     }
                 },
                 actions = {
+                    // Nút Chuyển đổi Split-Screen Chatbot AI
+                    IconButton(onClick = {
+                        isSplitScreenChatbotOpen = !isSplitScreenChatbotOpen
+                        Toast.makeText(
+                            context,
+                            if (isSplitScreenChatbotOpen) "Mở chế độ Split-Screen Chatbot AI" else "Đóng Chatbot Split-Screen",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "Split Screen AI",
+                            tint = if (isSplitScreenChatbotOpen) Color(0xFF7E22CE) else Color(0xFF1D4ED8)
+                        )
+                    }
                     IconButton(onClick = {
                         Toast.makeText(context, "Đã xuất tệp Word (.docx) thành công!", Toast.LENGTH_LONG).show()
                     }) {
@@ -185,15 +204,6 @@ fun ContractDocumentEditorScreen(
                             imageVector = Icons.Default.FileDownload,
                             contentDescription = "Tải file Word",
                             tint = Color(0xFF1D4ED8)
-                        )
-                    }
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Đã lưu bản nháp hợp đồng!", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Save,
-                            contentDescription = "Lưu bản nháp",
-                            tint = Color(0xFF16A34A)
                         )
                     }
                 },
@@ -222,6 +232,177 @@ fun ContractDocumentEditorScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(12.dp)
         ) {
+
+            // ==================== CỬA SỔ CHATBOT AI SPLIT-SCREEN (SONG SONG VĂN BẢN) ====================
+            AnimatedVisibility(
+                visible = isSplitScreenChatbotOpen,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F4FF)),
+                    border = BorderStroke(1.5.dp, Color(0xFF818CF8)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp)
+                    ) {
+                        // Split-Screen AI Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF4F46E5)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Interactive AI Copilot (Split-Screen)",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF312E81)
+                                    )
+                                    Text(
+                                        text = "Chat để điều chỉnh hợp đồng trực tiếp",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF4338CA)
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { isSplitScreenChatbotOpen = false },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Đóng Split-Screen",
+                                    tint = Color(0xFF4338CA)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Lịch sử Chat với AI Copilot
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 160.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = BorderStroke(1.dp, Color(0xFFC7D2FE))
+                        ) {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(chatMessages) { msg ->
+                                    val isAi = msg.sender == "AI"
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = if (isAi) Arrangement.Start else Arrangement.End
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.85f)
+                                                .clip(
+                                                    RoundedCornerShape(
+                                                        topStart = 10.dp,
+                                                        topEnd = 10.dp,
+                                                        bottomStart = if (isAi) 2.dp else 10.dp,
+                                                        bottomEnd = if (isAi) 10.dp else 2.dp
+                                                    )
+                                                )
+                                                .background(if (isAi) Color(0xFFEEF2FF) else Color(0xFF1D4ED8))
+                                                .padding(8.dp)
+                                        ) {
+                                            Text(
+                                                text = msg.text,
+                                                fontSize = 12.sp,
+                                                color = if (isAi) Color(0xFF1E293B) else Color.White,
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Khung nhập prompt chỉnh sửa trực tiếp hợp đồng
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = aiChatInput,
+                                onValueChange = { aiChatInput = it },
+                                placeholder = { Text("VD: Thêm điều khoản phạt chậm 0.05%/ngày...", fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color(0xFF4F46E5),
+                                    unfocusedBorderColor = Color(0xFFC7D2FE),
+                                    focusedContainerColor = Color.White,
+                                    unfocusedContainerColor = Color.White
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            IconButton(
+                                onClick = {
+                                    if (aiChatInput.isNotBlank()) {
+                                        val prompt = aiChatInput.trim()
+                                        chatMessages = chatMessages + ChatMessage("User", prompt)
+                                        aiChatInput = ""
+
+                                        // AI tự động cập nhật nội dung hợp đồng
+                                        contractContent += "\n\nĐIỀU BỔ SUNG (BỞI AI COPILOT):\n- Theo yêu cầu: '$prompt'\n- Các bên cam kết chấp hành bổ sung điều khoản này vào hợp đồng."
+                                        chatMessages = chatMessages + ChatMessage("AI", "Đã cập nhật điều khoản mới vào văn bản hợp đồng theo yêu cầu của bạn!")
+                                        Toast.makeText(context, "AI đã điều chỉnh văn bản hợp đồng!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF4F46E5))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Gửi",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // 1. Quick Form Input Panel (Bảng tự động điền biến {{Var}} theo mẫu)
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -331,26 +512,176 @@ fun ContractDocumentEditorScreen(
                             )
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = trialDuration,
-                            onValueChange = { trialDuration = it },
-                            label = { Text("Thời hạn thử việc") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF1D4ED8),
-                                unfocusedBorderColor = Color(0xFFCBD5E1)
+                        // Nếu văn bản có chứa biến động {{...}} phát hiện bằng TemplateVariableParser
+                        if (dynamicVariables.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Các biến số phát hiện tự động (${dynamicVariables.size}):",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF475569)
                             )
-                        )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            dynamicVariables.forEach { variable ->
+                                val currentVal = variableValuesMap[variable.key] ?: ""
+                                OutlinedTextField(
+                                    value = currentVal,
+                                    onValueChange = { newVal ->
+                                        variableValuesMap = variableValuesMap.toMutableMap().apply { put(variable.key, newVal) }
+                                        contractContent = TemplateVariableParser.replaceVariables(contractContent, variableValuesMap)
+                                    },
+                                    label = { Text(variable.displayName) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Color(0xFF7E22CE),
+                                        unfocusedBorderColor = Color(0xFFCBD5E1)
+                                    )
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 2. Word / Docs Format Editing Toolbar (Thanh công cụ định dạng Word)
+            // ==================== BAR BÔI ĐEN VĂN BẢN YÊU CẦU AI VIẾT LẠI (CONTEXTUAL SELECTION AI REWRITE) ====================
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFAF5FF)),
+                border = BorderStroke(1.dp, Color(0xFFE9D5FF))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFF7E22CE),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Bôi đen bối cảnh - AI Contextual Rewrite",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF581C87)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { isContextualRewriteVisible = !isContextualRewriteVisible },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isContextualRewriteVisible) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = Color(0xFF7E22CE)
+                            )
+                        }
+                    }
+
+                    if (isContextualRewriteVisible) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Đoạn văn bản được chọn:",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF6B21A8)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color.White)
+                                .border(1.dp, Color(0xFFE9D5FF), RoundedCornerShape(6.dp))
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                text = selectedClauseText,
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF3B0764)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = "Chọn lệnh cho AI viết lại:",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF6B21A8)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val rewritten = "2.1. Lương thử việc: 15,000,000 VNĐ/tháng (85% lương chính thức)."
+                                    contractContent = contractContent.replace(selectedClauseText, rewritten)
+                                    selectedClauseText = rewritten
+                                    Toast.makeText(context, "AI đã viết lại ngắn gọn hơn!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7E22CE)),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text("✂️ Ngắn gọn", fontSize = 11.sp, color = Color.White)
+                            }
+
+                            Button(
+                                onClick = {
+                                    val rewritten = "2.1. Mức lương thử việc: 15,000,000 VNĐ/tháng. Bên B chịu hoàn toàn trách nhiệm nghĩa vụ thuế TNCN và tuân thủ tuyệt đối quy định khấu trừ của Bên A."
+                                    contractContent = contractContent.replace(selectedClauseText, rewritten)
+                                    selectedClauseText = rewritten
+                                    Toast.makeText(context, "AI đã thắt chặt bảo vệ Doanh nghiệp!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1.2f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6B21A8)),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text("⚖️ Thắt chặt pháp lý", fontSize = 11.sp, color = Color.White)
+                            }
+
+                            Button(
+                                onClick = {
+                                    val rewritten = "2.1. Mức lương thử việc là 15,000,000 VNĐ/tháng. Thanh toán qua tài khoản ngân hàng chính thức vào ngày 05 hàng tháng."
+                                    contractContent = contractContent.replace(selectedClauseText, rewritten)
+                                    selectedClauseText = rewritten
+                                    Toast.makeText(context, "AI đã làm rõ nghĩa điều khoản!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1.1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF581C87)),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text("💡 Làm rõ nghĩa", fontSize = 11.sp, color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 2. Word / Docs Format Editing Toolbar
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),

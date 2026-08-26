@@ -191,6 +191,96 @@ fun ContractTemplatesScreen(
             )
             Spacer(modifier = Modifier.height(14.dp))
 
+            var showSaveTemplateDialog by remember { mutableStateOf(false) }
+            var newTemplateTitleText by remember { mutableStateOf("") }
+            var newTemplateContentText by remember { mutableStateOf("") }
+
+            if (showSaveTemplateDialog) {
+                val detectedVars = remember(newTemplateContentText) {
+                    com.smartcontractai.utils.TemplateVariableParser.extractVariables(newTemplateContentText)
+                }
+
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showSaveTemplateDialog = false },
+                    title = {
+                        Text(
+                            text = "Lưu Hợp Đồng Thành Mẫu Mới",
+                            fontSize = 16.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "Nhập nội dung mẫu. Nhập các thẻ {{Ten_Bien}} để hệ thống tự động nhận diện biến số.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B)
+                            )
+
+                            androidx.compose.material3.OutlinedTextField(
+                                value = newTemplateTitleText,
+                                onValueChange = { newTemplateTitleText = it },
+                                label = { Text("Tên Mẫu Hợp Đồng") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            androidx.compose.material3.OutlinedTextField(
+                                value = newTemplateContentText,
+                                onValueChange = { newTemplateContentText = it },
+                                label = { Text("Nội dung hợp đồng chứa {{Biến_Số}}") },
+                                placeholder = { Text("Hợp đồng giữa {{Ten_Bên_A}} và {{Ten_Bên_B}}...") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(130.dp)
+                            )
+
+                            if (detectedVars.isNotEmpty()) {
+                                Text(
+                                    text = "Đã phát hiện ${detectedVars.size} biến số tự động: ${detectedVars.joinToString { it.displayName }}",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1D4ED8)
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (newTemplateTitleText.isBlank()) {
+                                    Toast.makeText(context, "Vui lòng nhập tên mẫu hợp đồng", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val newModel = ContractTemplateModel(
+                                        id = System.currentTimeMillis().toString(),
+                                        title = newTemplateTitleText.trim(),
+                                        description = "Mẫu tùy chỉnh tự lưu với ${detectedVars.size} trường biến số tự động.",
+                                        category = "Tự lưu",
+                                        scope = "Doanh nghiệp",
+                                        badgeText = "MẪU TỰ LƯU",
+                                        usageCount = "Đã lưu vừa xong",
+                                        timeAgo = "Hôm nay",
+                                        templateContent = newTemplateContentText
+                                    )
+                                    templatesList = listOf(newModel) + templatesList
+                                    showSaveTemplateDialog = false
+                                    Toast.makeText(context, "Đã lưu mẫu mới với ${detectedVars.size} biến số thành công!", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8))
+                        ) {
+                            Text("Lưu Mẫu", color = Color.White)
+                        }
+                    },
+                    dismissButton = {
+                        OutlinedButton(onClick = { showSaveTemplateDialog = false }) {
+                            Text("Hủy")
+                        }
+                    }
+                )
+            }
+
             // Action Buttons: "Lưu mẫu mới" & "Tạo bằng AI"
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -199,7 +289,7 @@ fun ContractTemplatesScreen(
             ) {
                 Button(
                     onClick = {
-                        Toast.makeText(context, "Lưu mẫu mới từ bản nháp thành công", Toast.LENGTH_SHORT).show()
+                        showSaveTemplateDialog = true
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),

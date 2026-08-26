@@ -3142,115 +3142,32 @@ fun BusinessAdministrationScreen(
     }
 
     if (showAddEmployeeDialog) {
-        var newName by remember { mutableStateOf("") }
-        var newRole by remember { mutableStateOf("") }
-        var newEmail by remember { mutableStateOf("") }
-
-        AlertDialog(
+        AddStaffQRModal(
             onDismissRequest = { showAddEmployeeDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.PersonAdd,
-                        contentDescription = null,
-                        tint = Color(0xFF1D4ED8),
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Thêm nhân viên cho Doanh nghiệp",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
+            onStaffAdded = { name, phone, role ->
+                val nameParts = name.trim().split("\\s+".toRegex())
+                val initials = when {
+                    nameParts.size >= 2 -> "${nameParts.first().take(1)}${nameParts.last().take(1)}".uppercase()
+                    nameParts.isNotEmpty() && nameParts[0].length >= 2 -> nameParts[0].take(2).uppercase()
+                    nameParts.isNotEmpty() -> nameParts[0].uppercase()
+                    else -> "NV"
                 }
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("Họ và tên nhân viên *") },
-                        placeholder = { Text("Ví dụ: Nguyễn Văn A") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    )
 
-                    OutlinedTextField(
-                        value = newRole,
-                        onValueChange = { newRole = it },
-                        label = { Text("Chức vụ / Phòng ban *") },
-                        placeholder = { Text("Ví dụ: Legal Counsel, HR, Specialist...") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    )
+                val bgColors = listOf(Color(0xFFEEF2FF), Color(0xFFDCFCE7), Color(0xFFFEF3C7), Color(0xFFF3E8FF), Color(0xFFE0F2FE))
+                val textColors = listOf(Color(0xFF4F46E5), Color(0xFF16A34A), Color(0xFFD97706), Color(0xFF9333EA), Color(0xFF0284C7))
+                val colorIdx = (teamList.size) % bgColors.size
 
-                    OutlinedTextField(
-                        value = newEmail,
-                        onValueChange = { newEmail = it },
-                        label = { Text("Email công việc (Không bắt buộc)") },
-                        placeholder = { Text("nva@company.com") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (newName.isBlank()) {
-                            Toast.makeText(context, "Vui lòng nhập họ tên nhân viên!", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        val roleText = newRole.ifBlank { "Nhân viên" }
-                        val nameParts = newName.trim().split("\\s+".toRegex())
-                        val initials = when {
-                            nameParts.size >= 2 -> "${nameParts.first().take(1)}${nameParts.last().take(1)}".uppercase()
-                            nameParts.isNotEmpty() && nameParts[0].length >= 2 -> nameParts[0].take(2).uppercase()
-                            nameParts.isNotEmpty() -> nameParts[0].uppercase()
-                            else -> "NV"
-                        }
-
-                        val bgColors = listOf(Color(0xFFEEF2FF), Color(0xFFDCFCE7), Color(0xFFFEF3C7), Color(0xFFF3E8FF), Color(0xFFE0F2FE))
-                        val textColors = listOf(Color(0xFF4F46E5), Color(0xFF16A34A), Color(0xFFD97706), Color(0xFF9333EA), Color(0xFF0284C7))
-                        val colorIdx = (teamList.size) % bgColors.size
-
-                        val member = TeamMemberData(
-                            id = System.currentTimeMillis().toString(),
-                            name = newName.trim(),
-                            role = roleText.trim(),
-                            initials = initials,
-                            avatarBg = bgColors[colorIdx],
-                            avatarTextColor = textColors[colorIdx]
-                        )
-                        teamList = teamList + member
-                        Toast.makeText(context, "Đã thêm nhân viên ${newName.trim()} vào doanh nghiệp!", Toast.LENGTH_LONG).show()
-                        showAddEmployeeDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Thêm nhân viên", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = { showAddEmployeeDialog = false },
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Hủy", color = Color(0xFF64748B))
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(16.dp)
+                val member = TeamMemberData(
+                    id = System.currentTimeMillis().toString(),
+                    name = name.trim(),
+                    role = role.trim(),
+                    initials = initials,
+                    avatarBg = bgColors[colorIdx],
+                    avatarTextColor = textColors[colorIdx]
+                )
+                teamList = teamList + member
+                showAddEmployeeDialog = false
+            }
         )
     }
 
